@@ -1,0 +1,33 @@
+const dotenv = require("dotenv");
+
+dotenv.config();
+
+const getNumber = (value, fallback) => {
+	const parsed = Number.parseInt(value, 10);
+	return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+module.exports = {
+	nodeEnv: process.env.NODE_ENV || "development",
+	port: getNumber(process.env.PORT, 3000),
+	mongoUri: process.env.MONGO_URI || "mongodb://127.0.0.1:27017/threatlens",
+	jwtSecret: process.env.JWT_SECRET || "change-me",
+	jwtExpiresIn: process.env.JWT_EXPIRES_IN || "1h",
+	refreshTokenSecret: process.env.REFRESH_TOKEN_SECRET || "change-me-too",
+	refreshTokenExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || "30d",
+	corsOrigin: process.env.CORS_ORIGIN || "http://localhost:3000",
+	idsEngineUrl: process.env.IDS_ENGINE_URL || "http://localhost:5001",
+	rateLimitWindowMs: getNumber(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
+	rateLimitMax: getNumber(process.env.RATE_LIMIT_MAX, 100),
+	authRateLimitMax: getNumber(process.env.AUTH_RATE_LIMIT_MAX, 15),
+	bodyLimit: process.env.BODY_LIMIT || "1mb",
+	refreshCookieName: process.env.REFRESH_COOKIE_NAME || "threatlens_rt",
+	refreshCookieDomain: process.env.REFRESH_COOKIE_DOMAIN || undefined,
+	refreshCookieSecure: process.env.REFRESH_COOKIE_SECURE === "true",
+	refreshCookieSameSite: process.env.REFRESH_COOKIE_SAMESITE || "lax",
+	integrationApiKey: process.env.INTEGRATION_API_KEY || "",
+	requestLogLevel: process.env.REQUEST_LOG_LEVEL || "info",
+	alertCorrelationWindowMins: getNumber(process.env.ALERT_CORRELATION_WINDOW_MINS, 10),
+	dosThresholdPerMinute: getNumber(process.env.DOS_THRESHOLD_PER_MINUTE, 150),
+	bruteforceThreshold: getNumber(process.env.BRUTE_FORCE_THRESHOLD, 5)
+};

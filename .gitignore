@@ -1,0 +1,46 @@
+# ========================
+# Node.js
+# ========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ========================
+# Environment variables
+# ========================
+.env
+.env.local
+.env.development
+.env.production
+
+# ========================
+# Python
+# ========================
+__pycache__/
+*.pyc
+venv/
+.env/
+
+# ========================
+# Logs
+# ========================
+logs/
+*.log
+
+# ========================
+# OS Files
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Build folders
+# ========================
+build/
+dist/
+
+# ========================
+# VS Code
+# ========================
+.vscode/
