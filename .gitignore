@@ -1,46 +1,71 @@
 # ========================
-# Node.js
+# 🚀 NODE.JS
 # ========================
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # ========================
-# Environment variables
+# 🔐 ENVIRONMENT VARIABLES (CRITICAL)
 # ========================
 .env
-.env.local
-.env.development
-.env.production
+.env.*
+!.env.example
 
 # ========================
-# Python
+# 🧠 AGENT DATA (IMPORTANT)
+# ========================
+agent-data/
+*.db
+*.sqlite
+
+# ========================
+# 🐍 PYTHON (for IDS / Snort / ML)
 # ========================
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 venv/
-.env/
+.venv/
 
 # ========================
-# Logs
+# 📊 LOGS
 # ========================
 logs/
 *.log
 
 # ========================
-# OS Files
+# 🖥️ OS FILES
 # ========================
 .DS_Store
 Thumbs.db
 
 # ========================
-# Build folders
+# 🏗️ BUILD / DIST
 # ========================
 build/
 dist/
+coverage/
 
 # ========================
-# VS Code
+# 🧰 EDITORS / IDEs
 # ========================
 .vscode/
+.idea/
+
+# ========================
+# 🔒 SECURITY (EXTRA SAFETY)
+# ========================
+*.pem
+*.key
+*.crt
+
+# ========================
+# 📦 TEMP FILES
+# ========================
+tmp/
+temp/
+.cache/

@@ -2,24 +2,30 @@ const Organization = require("../models/Organization");
 
 const validateAPIKey = async (req, res, next) => {
   try {
-    const apiKey = req.header("X-API-Key");
-    const assetId = req.header("X-Asset-ID");
+
+    const apiKey = req.headers["x-api-key"];
+    const assetId = req.headers["x-asset-id"];
 
     if (!apiKey || !assetId) {
       return res.status(400).json({
         error: "Missing required headers",
-        required: ["X-API-Key", "X-Asset-ID"],
+        required: ["X-API-Key", "X-Asset-ID"]
       });
     }
 
     const org = await Organization.findOne({
-      agent_api_key: apiKey,
-      status: "active",
+      agent_api_key: apiKey
     });
 
     if (!org) {
       return res.status(401).json({
-        error: "Invalid API key",
+        error: "Invalid API key"
+      });
+    }
+
+    if (org.status !== "active") {
+      return res.status(403).json({
+        error: "Organization inactive"
       });
     }
 
@@ -28,9 +34,12 @@ const validateAPIKey = async (req, res, next) => {
     req.assetId = assetId;
 
     next();
+
   } catch (err) {
     console.error("[Auth Error]", err);
-    res.status(500).json({ error: "Authentication error" });
+    return res.status(500).json({
+      error: "Authentication error"
+    });
   }
 };
 

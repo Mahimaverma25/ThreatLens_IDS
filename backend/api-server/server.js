@@ -15,57 +15,79 @@ const alertRoutes = require("./routes/alerts.routes");
 const authRoutes = require("./routes/auth.routes");
 const logRoutes = require("./routes/logs.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
-const ingestRoutes = require("./routes/ingest.routes");
 const apikeyRoutes = require("./routes/apikey.routes");
 const assetRoutes = require("./routes/asset.routes");
 
 const app = express();
 const server = http.createServer(app);
 
-// 🔥 VERY IMPORTANT FIX
+/* ================= IMPORTANT CONFIG ================= */
+
+// Required for correct IP handling
 app.set("trust proxy", 1);
 
-// Security middleware
+/* ================= SECURITY ================= */
+
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use(cookieParser());
 
-// Body parser
+/* ================= BODY PARSER ================= */
+
 app.use(express.json({ limit: config.bodyLimit }));
 
-// Logger
+/* ================= LOGGER ================= */
+
 app.use(requestLogger);
 
-// Rate limiting (AFTER trust proxy)
+/* ================= RATE LIMIT ================= */
+
 app.use(apiLimiter);
+
+/* ================= DATABASE ================= */
 
 connectDB();
 
+/* ================= HEALTH CHECK ================= */
+
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "ThreatLens API running" });
+});
+
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
-// Ingest API
-app.use("/api/ingest", ingestRoutes);
+/* ================= ROUTES ================= */
 
-// Auth routes
+// 🔐 Auth routes (JWT based)
 app.use("/api/auth", authLimiter, authRoutes);
 
-// Protected routes
-app.use("/api/alerts", orgIsolation, alertRoutes);
+// 🔥 IMPORTANT: Logs route MUST use orgIsolation
+// Supports BOTH:
+// - Agent (x-api-key + x-org-id)
+// - User (JWT)
 app.use("/api/logs", orgIsolation, logRoutes);
+
+// 🔐 Protected routes (require org context)
+app.use("/api/alerts", orgIsolation, alertRoutes);
 app.use("/api/dashboard", orgIsolation, dashboardRoutes);
+app.use("/api/assets", orgIsolation, assetRoutes);
 
-// Admin routes
-app.use("/api/admin/api-keys", apikeyRoutes);
-app.use("/api/assets", assetRoutes);
+// 🔐 Admin routes (should also be protected ideally)
+app.use("/api/admin/api-keys", orgIsolation, apikeyRoutes);
 
-// Global error handler
+/* ================= ERROR HANDLER ================= */
+
 app.use((err, req, res, next) => {
-  console.error(err);
+  console.error("❌ Global Error:", err);
   res.status(500).json({ message: "Internal server error" });
 });
 
+/* ================= SOCKET ================= */
+
 initSocket(server);
 
+/* ================= SERVER START ================= */
+
 server.listen(config.port, () =>
-  console.log(`Secure API running on port ${config.port}`)
+  console.log(`🚀 ThreatLens API running on port ${config.port}`)
 );

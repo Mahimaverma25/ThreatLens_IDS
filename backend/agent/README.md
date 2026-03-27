@@ -1,83 +1,54 @@
+
 # ThreatLens Agent
 
-Lightweight security event collector and sensor for monitoring systems and applications. Runs on customer infrastructure to collect security events and submit them to the ThreatLens detection engine.
+A lightweight Node.js agent for collecting and forwarding security events to the ThreatLens backend.
 
 ## Features
+- Collects system, network, and application events
+- Secure API key authentication (HMAC signing supported)
+- Batching and retry logic for reliability
+- Configurable log sources and monitored ports
 
-- 🚀 **Lightweight**: Minimal resource footprint, runs on any Linux/Windows systems
-- 🔐 **Secure**: API key + HMAC-SHA256 signature verification for all submissions
-- 📦 **Batching**: Intelligent event batching reduces API calls and network overhead
-- 🔄 **Resilient**: Automatic retry with exponential backoff for failed submissions
-- 📊 **Event Sources**: Monitors system logs, HTTP traffic, network activity, and file changes
-- 📈 **Scalable**: Handle multiple log sources and high-volume events
-
-## Installation
-
-### Prerequisites
-
-- Node.js 18.0.0 or higher
-- npm or yarn
-
-### Quick Start
-
-```bash
-# Clone and navigate to agent directory
-cd backend/agent
-
-# Install dependencies
-npm install
-
-# Copy and configure environment variables
-cp .env.example .env
-# Edit .env with your ThreatLens API credentials
-
-# Start the agent
-npm start
+## Folder Structure
+```
+agent/
+   agent.js
+   agent-data/
+   package.json
+   README.md
 ```
 
-### Docker Deployment
-
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm install --production
-COPY agent.js ./
-CMD ["node", "agent.js"]
-```
+## Setup & Run
+1. Copy `.env.example` to `.env` and fill in your API credentials and asset ID.
+2. Install dependencies:
+  ```bash
+  cd backend/agent
+  npm install
+  ```
+3. Start the agent:
+  ```bash
+  npm start
+  ```
 
 ## Configuration
+Edit `.env` with:
+- `THREATLENS_API_URL` — Backend API URL
+- `THREATLENS_API_KEY` — API key from dashboard
+- `THREATLENS_API_SECRET` — API secret (if used)
+- `ASSET_ID` — Unique asset identifier
 
-Edit `.env` file with the following values:
+## Security
+- API key is required for all submissions
+- HMAC signing is recommended for production
 
-### Required Fields
+## Troubleshooting
+- Check logs in `agent-error.log` for issues
+- Ensure API key and asset ID are correct
+- Network errors may indicate backend is unreachable
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `THREATLENS_API_URL` | ThreatLens API server URL | `http://threatclens.io` |
-| `THREATLENS_API_KEY` | API Key for authentication | `key_abc123xyz` |
-| `THREATLENS_API_SECRET` | API Secret for HMAC signing | `secret_def456uvw` |
-| `ASSET_ID` | Unique identifier for this asset | `asset-web01-prod` |
-
-### Optional Fields
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BATCH_SIZE` | 50 | Events per batch before sending |
-| `BATCH_TIMEOUT_MS` | 10000 | Max wait before sending partial batch |
-| `LOG_SOURCES` | nginx,syslog,auth | Monitoring sources |
-| `ENABLE_NETWORK_MONITORING` | true | Monitor network traffic |
-| `MONITORED_PORTS` | 80,443,22,3306 | Ports to monitor |
-| `LOG_LEVEL` | info | winston log level |
-
-## Getting API Credentials
-
-1. Log in to ThreatLens Dashboard
-2. Navigate to **Settings → API Keys**
-3. Create new key for this asset
-4. Copy the `API Key` and `API Secret`
-   - ⚠️ Secret is shown only once - save it securely
-5. Associate key with the Asset to monitor
+## Integration
+- Designed to work with ThreatLens backend and dashboard
+- Can be extended to support additional log sources
 6. Add credentials to `.env` file on the Agent host
 
 ## Security Best Practices

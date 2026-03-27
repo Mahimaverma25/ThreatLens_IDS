@@ -1,8 +1,7 @@
 require("dotenv").config();
 
-const fs = require("fs");
-const { v4: uuidv4 } = require("uuid");
 const axios = require("axios");
+const { v4: uuidv4 } = require("uuid");
 const winston = require("winston");
 
 /* ================= LOGGER ================= */
@@ -19,9 +18,11 @@ const logger = winston.createLogger({
   ]
 });
 
-logger.add(new winston.transports.Console({
-  format: winston.format.simple()
-}));
+logger.add(
+  new winston.transports.Console({
+    format: winston.format.simple()
+  })
+);
 
 /* ================= CONFIG ================= */
 
@@ -29,9 +30,13 @@ const config = {
   apiUrl: process.env.THREATLENS_API_URL || "http://localhost:5000",
   apiKey: process.env.THREATLENS_API_KEY,
   assetId: process.env.ASSET_ID || "default-asset",
+
   batchSize: parseInt(process.env.BATCH_SIZE || "50"),
   batchTimeoutMs: parseInt(process.env.BATCH_TIMEOUT_MS || "10000"),
-  healthCheckIntervalMs: parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || "60000")
+
+  healthCheckIntervalMs: parseInt(
+    process.env.HEALTH_CHECK_INTERVAL_MS || "60000"
+  )
 };
 
 if (!config.apiKey) {
@@ -47,6 +52,10 @@ class EventBuffer {
     this.batchSize = batchSize;
     this.timeoutMs = timeoutMs;
     this.onBatchReady = onBatchReady;
+
+    setInterval(() => {
+      this.flush();
+    }, this.timeoutMs);
   }
 
   add(event) {
@@ -69,52 +78,73 @@ class EventBuffer {
 
 class APIClient {
   constructor(apiUrl, apiKey) {
+    this.apiKey = apiKey;
+
     this.client = axios.create({
       baseURL: apiUrl,
       timeout: 10000
     });
-
-    this.apiKey = apiKey;
   }
 
   async submitEvents(events, assetId) {
     try {
+      const payload = {
+        logs: events.map((e) => ({
+          message: `Event: ${e.event_type}`,
+          level: e.severity || "info",
+          source: e.source || "agent",
+          eventType: e.event_type,
+          metadata: e.metadata || {},
+          asset_id: assetId,
+          timestamp: e.timestamp
+        }))
+      };
+
       const response = await this.client.post(
-        "/api/ingest/v1/ingest",
-        { events },
+        "/api/logs/ingest",
+        payload,
         {
           headers: {
             "Content-Type": "application/json",
-            "X-API-Key": this.apiKey,
-            "X-Asset-ID": assetId
+            "X-api-Key": this.apiKey,
+            "x-org-id": process.env.ORG_ID || "default-org"
           }
         }
       );
 
-      logger.info(`✅ Submitted ${events.length} events (status ${response.status})`);
-      return true;
+      logger.info(
+        `✅ Submitted ${events.length} events (status ${response.status})`
+      );
 
+      return true;
     } catch (error) {
       if (error.response) {
         logger.error(`❌ Submit failed ${error.response.status}`);
+        logger.error(
+          `❌ Backend response: ${JSON.stringify(error.response.data)}`
+        );
       } else {
-        logger.error(`❌ Submit error: ${error.message}`);
+        logger.error(`❌ Network error: ${error.message}`);
       }
+
       return false;
     }
   }
 
+  // ✅ FIXED HEALTH CHECK (NO AUTH REQUIRED)
   async healthCheck() {
     try {
-      const response = await this.client.get("/api/ingest/v1/health");
-      return response.data.status === "ok";
-    } catch {
+      await this.client.get("/"); // 👈 simple ping
+
+      return true;
+    } catch (error) {
+      logger.warn("⚠ Backend health check failed");
       return false;
     }
   }
 }
 
-/* ================= COLLECTOR ================= */
+/* ================= EVENT COLLECTOR ================= */
 
 class EventCollector {
   constructor(assetId) {
@@ -128,9 +158,13 @@ class EventCollector {
       timestamp: new Date().toISOString(),
       event_type: "system_event",
       severity: "low",
-      source: "system",
+      source: "agent",
       asset_id: this.assetId,
-      metadata: { example: uuidv4() }
+
+      metadata: {
+        uuid: uuidv4(),
+        example: "heartbeat"
+      }
     };
   }
 }
@@ -139,8 +173,13 @@ class EventCollector {
 
 class ThreatLensAgent {
   constructor(config) {
-    this.apiClient = new APIClient(config.apiUrl, config.apiKey);
+    this.apiClient = new APIClient(
+      config.apiUrl,
+      config.apiKey
+    );
+
     this.collector = new EventCollector(config.assetId);
+
     this.buffer = new EventBuffer(
       config.batchSize,
       config.batchTimeoutMs,
@@ -152,8 +191,11 @@ class ThreatLensAgent {
     logger.info("🚀 ThreatLens Agent Starting...");
 
     const healthy = await this.apiClient.healthCheck();
-    if (!healthy) {
-      logger.warn("⚠ Backend not healthy");
+
+    if (healthy) {
+      logger.info("✅ Backend connected");
+    } else {
+      logger.warn("⚠ Backend not reachable");
     }
 
     setInterval(() => {
@@ -161,7 +203,7 @@ class ThreatLensAgent {
       this.buffer.add(event);
     }, 1000);
 
-    logger.info("✅ Agent running");
+    logger.info("✅ Agent running...");
   }
 
   async submit(events) {
@@ -172,6 +214,10 @@ class ThreatLensAgent {
 /* ================= ENTRY ================= */
 
 (async () => {
-  const agent = new ThreatLensAgent(config);
-  await agent.start();
+  try {
+    const agent = new ThreatLensAgent(config);
+    await agent.start();
+  } catch (err) {
+    logger.error("❌ Agent crashed: " + err.message);
+  }
 })();

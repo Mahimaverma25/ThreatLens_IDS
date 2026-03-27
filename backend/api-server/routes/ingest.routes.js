@@ -1,34 +1,36 @@
-/**
- * Ingest Routes
- * Endpoints for agent data submission
- * Uses API key authentication (not JWT)
- */
-
 const express = require("express");
 const router = express.Router();
 
-const { validateAPIKey, validateIngestPayload } = require("../middleware/ingest.middleware");
-const { orgIsolation } = require("../middleware/orgIsolation.middleware");
-const IngestController = require("../controllers/ingest.controller");
+/**
+ * ==============================
+ * ✅ HEALTH CHECK
+ * ==============================
+ */
+router.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
 
 /**
- * POST /api/ingest/v1/ingest
- * Agent submits events
- * Requires: X-API-Key, X-Timestamp, X-Signature, X-Asset-ID
+ * ==============================
+ * 🚫 REMOVE THIS FILE LOGIC
+ * ==============================
+ * Ingest is now handled by:
+ * /api/logs/ingest
+ *
+ * Using:
+ * - x-api-key
+ * - x-org-id
+ * - orgIsolation middleware
  */
-router.post("/v1/ingest", validateAPIKey, validateIngestPayload, IngestController.ingestEvents);
 
 /**
- * GET /api/ingest/v1/health
- * Health check - no auth required
+ * OPTIONAL: Redirect old endpoint to new one
  */
-router.get("/v1/health", IngestController.healthCheck);
-
-/**
- * GET /api/ingest/v1/stats
- * Ingest statistics - requires org context
- * Requires: JWT auth
- */
-router.get("/v1/stats", orgIsolation, IngestController.getIngestStats);
+router.post("/v1/ingest", (req, res) => {
+  res.status(410).json({
+    error: "Deprecated endpoint",
+    message: "Use /api/logs/ingest instead"
+  });
+});
 
 module.exports = router;
