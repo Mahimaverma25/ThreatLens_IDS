@@ -28,24 +28,31 @@ const server = http.createServer(app);
 
 app.set("trust proxy", 1);
 
-/* ================= HEALTH CHECK (VERY IMPORTANT) ================= */
+/* ================= HEALTH CHECK ================= */
 
 app.get("/health", (req, res) => {
   res.status(200).json({
     status: "OK",
-    message: "ThreatLens Backend Running 🚀"
+    message: "ThreatLens Backend Running 🚀",
   });
 });
 
 /* ================= SECURITY ================= */
 
 app.use(helmet());
-app.use(cors({ origin: config.corsOrigin, credentials: true }));
+app.use(
+  cors({
+    origin: config.corsOrigin || "http://localhost:3000",
+    credentials: true,
+  })
+);
 app.use(cookieParser());
 
-/* ================= BODY PARSER ================= */
+/* ================= BODY PARSER (FIXED) ================= */
 
-app.use(express.json({ limit: config.bodyLimit }));
+// 🔥 MUST be before routes
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 /* ================= LOGGER ================= */
 
@@ -64,7 +71,7 @@ connectDB();
 // 🔐 Auth routes
 app.use("/api/auth", authLimiter, authRoutes);
 
-// 🔥 Logs route (agent hits this)
+// 🔥 Logs route (agent)
 app.use("/api/logs", logRoutes);
 
 // 🔐 Protected routes
@@ -77,7 +84,7 @@ app.use("/api/admin/api-keys", orgIsolation, apikeyRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
-    message: "Route not found"
+    message: "Route not found",
   });
 });
 
@@ -85,7 +92,6 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error("Server Error:", err);
-  res.status(500).json({ error: "server crash" });
 
   if (res.headersSent) {
     return next(err);
@@ -95,7 +101,7 @@ app.use((err, req, res, next) => {
     message:
       process.env.NODE_ENV === "production"
         ? "Internal Server Error"
-        : err.message
+        : err.message,
   });
 });
 
