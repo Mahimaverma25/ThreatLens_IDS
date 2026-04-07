@@ -1,36 +1,22 @@
+/**
+ * ⚠️ DEPRECATED - This file is no longer in use and should be deleted
+ *
+ * Ingest API is now handled by:
+ * - Route: POST /api/logs/ingest
+ * - Middleware: validateAPIKey + validateIngestPayload (from ingest.middleware.js)
+ *
+ * To use the ingest endpoint:
+ * - Endpoint: POST /api/logs/ingest
+ * - Headers: X-API-Key, X-Timestamp, X-Signature, X-Asset-ID
+ * - Body: { events: [...] }
+ *
+ * See: backend/api-server/routes/logs.routes.js
+ */
+
 const express = require("express");
 const router = express.Router();
 
-/**
- * ==============================
- * ✅ HEALTH CHECK
- * ==============================
- */
-router.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
-/**
- * ==============================
- * 🚫 REMOVE THIS FILE LOGIC
- * ==============================
- * Ingest is now handled by:
- * /api/logs/ingest
- *
- * Using:
- * - x-api-key
- * - x-org-id
- * - orgIsolation middleware
- */
-
-/**
- * OPTIONAL: Redirect old endpoint to new one
- */
-router.post("/v1/ingest", (req, res) => {
-  res.status(410).json({
-    error: "Deprecated endpoint",
-    message: "Use /api/logs/ingest instead"
-  });
-});
+// This router is deprecated and should be removed from imports
+module.exports = router;
 
 module.exports = router;

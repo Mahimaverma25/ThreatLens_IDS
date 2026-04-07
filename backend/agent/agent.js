@@ -10,95 +10,49 @@ const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.json()
+    winston.format.printf(({ timestamp, level, message }) => {
+      return `${timestamp} [${level.toUpperCase()}] ${message}`;
+    })
   ),
   transports: [
     new winston.transports.File({ filename: "agent-error.log", level: "error" }),
-    new winston.transports.File({ filename: "agent-combined.log" })
+    new winston.transports.File({ filename: "agent-combined.log" }),
+    new winston.transports.Console()
   ]
 });
-
-logger.add(
-  new winston.transports.Console({
-    format: winston.format.simple()
-  })
-);
 
 /* ================= CONFIG ================= */
 
 const config = {
-  apiUrl: process.env.THREATLENS_API_URL || "http://localhost:5000",
-  apiKey: process.env.THREATLENS_API_KEY,
+  apiUrl: process.env.THREATLENS_API_URL || "http://localhost:5000", // ✅ FIXED
+  apiSecret: process.env.THREATLENS_API_SECRET || "tlk_secret_dev",
+  orgId: process.env.ORG_ID || "69c69322158c10ad1914c0b3",
   assetId: process.env.ASSET_ID || "default-asset",
 
-  batchSize: parseInt(process.env.BATCH_SIZE || "50"),
-  batchTimeoutMs: parseInt(process.env.BATCH_TIMEOUT_MS || "10000"),
-
-  healthCheckIntervalMs: parseInt(
-    process.env.HEALTH_CHECK_INTERVAL_MS || "60000"
-  )
+  intervalMs: 2000,
+  batchSize : 5, // sends logs in batch
+  maxRetries: 3
 };
-
-if (!config.apiKey) {
-  console.error("❌ THREATLENS_API_KEY is required in .env");
-  process.exit(1);
-}
-
-/* ================= EVENT BUFFER ================= */
-
-class EventBuffer {
-  constructor(batchSize, timeoutMs, onBatchReady) {
-    this.events = [];
-    this.batchSize = batchSize;
-    this.timeoutMs = timeoutMs;
-    this.onBatchReady = onBatchReady;
-
-    setInterval(() => {
-      this.flush();
-    }, this.timeoutMs);
-  }
-
-  add(event) {
-    this.events.push(event);
-
-    if (this.events.length >= this.batchSize) {
-      this.flush();
-    }
-  }
-
-  flush() {
-    if (this.events.length === 0) return;
-
-    const batch = this.events.splice(0);
-    this.onBatchReady(batch);
-  }
-}
 
 /* ================= API CLIENT ================= */
 
 class APIClient {
-  constructor(apiUrl, apiKey) {
-    this.apiKey = apiKey;
+  constructor(config) {
+    this.apiSecret = config.apiSecret;
+    this.orgId = config.orgId;
+    this.maxRetries = config.maxRetries;
 
     this.client = axios.create({
-      baseURL: apiUrl,
+      baseURL: config.apiUrl,
       timeout: 10000
     });
   }
 
-  async submitEvents(events, assetId) {
+  async submitLogs(logs, attempt = 1) {
     try {
-      const payload = {
-        logs: events.map((e) => ({
-          message: `Event: ${e.event_type}`,
-          level: e.severity || "info",
-          source: e.source || "agent",
-          eventType: e.event_type,
-          metadata: e.metadata || {},
-          asset_id: assetId,
-          timestamp: e.timestamp
-        }))
-      };
+      // ✅ MATCH BACKEND FORMAT
+      const payload = {logs}; // CRITICAL: wrap in "logs" key to match backend expectation
+      logger.info(`📤 Sending ${logs.length} logs (attempt ${attempt})`);
 
       const response = await this.client.post(
         "/api/logs/ingest",
@@ -106,39 +60,46 @@ class APIClient {
         {
           headers: {
             "Content-Type": "application/json",
-            "X-api-Key": this.apiKey,
-            "x-org-id": process.env.ORG_ID || "default-org"
+            // "x-api-key": this.apiSecret,
+            "x-api-key": "tlk_secret_dev_123456",
+            "x-org-id": this.orgId
           }
         }
       );
 
-      logger.info(
-        `✅ Submitted ${events.length} events (status ${response.status})`
-      );
-
+      logger.info(`✅ Success: ${response.status}`);
       return true;
+
     } catch (error) {
       if (error.response) {
-        logger.error(`❌ Submit failed ${error.response.status}`);
-        logger.error(
-          `❌ Backend response: ${JSON.stringify(error.response.data)}`
-        );
+        logger.error(`❌ ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+
+        // 🚨 AUTH ERROR (NO RETRY)
+        if (error.response.status === 401) {
+          logger.error("🚨 Unauthorized! Check API KEY or ORG ID");
+          return false;
+        }
       } else {
         logger.error(`❌ Network error: ${error.message}`);
       }
 
+      // 🔁 RETRY LOGIC
+      if (attempt < this.maxRetries) {
+        logger.warn(`🔁 Retrying... (${attempt + 1})`);
+        return this.submitLogs(logs, attempt + 1);
+      }
+
+      logger.error("❌ Failed after max retries");
       return false;
     }
   }
 
-  // ✅ FIXED HEALTH CHECK (NO AUTH REQUIRED)
   async healthCheck() {
     try {
-      await this.client.get("/"); // 👈 simple ping
-
+      await this.client.get("/health");
       return true;
-    } catch (error) {
-      logger.warn("⚠ Backend health check failed");
+    } catch (err) {
+      logger.warn("⚠ Health check failed");
       return false;
     }
   }
@@ -152,18 +113,21 @@ class EventCollector {
     this.counter = 0;
   }
 
-  collectRandomEvent() {
+  collectEvent() {
+    this.counter++;
+
     return {
-      event_id: `${this.assetId}-${++this.counter}-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      event_type: "system_event",
-      severity: "low",
+      message: "SQL Injection attempt detected",
+      level: "high",
       source: "agent",
-      asset_id: this.assetId,
+      eventType: "SQL Injection",
+      ip: "127.0.0.1",
+      timestamp: new Date().toISOString(),
 
       metadata: {
         uuid: uuidv4(),
-        example: "heartbeat"
+        asset_id: this.assetId,
+        count: this.counter
       }
     };
   }
@@ -173,18 +137,13 @@ class EventCollector {
 
 class ThreatLensAgent {
   constructor(config) {
-    this.apiClient = new APIClient(
-      config.apiUrl,
-      config.apiKey
-    );
-
+    this.apiClient = new APIClient(config);
     this.collector = new EventCollector(config.assetId);
 
-    this.buffer = new EventBuffer(
-      config.batchSize,
-      config.batchTimeoutMs,
-      (batch) => this.submit(batch)
-    );
+    this.intervalMs = config.intervalMs;
+    this.batchSize = config.batchSize;
+
+    this.buffer = [];
   }
 
   async start() {
@@ -198,16 +157,43 @@ class ThreatLensAgent {
       logger.warn("⚠ Backend not reachable");
     }
 
-    setInterval(() => {
-      const event = this.collector.collectRandomEvent();
-      this.buffer.add(event);
-    }, 1000);
+    setInterval(async () => {
+      try {
+        const event = this.collector.collectEvent();
+        this.buffer.push(event);
+
+        logger.info(`📥 Event collected (buffer: ${this.buffer.length})`);
+
+        if (this.buffer.length >= this.batchSize) {
+          const logsToSend = [...this.buffer];
+          this.buffer = [];
+
+          const success = await this.apiClient.submitLogs(logsToSend);
+
+          // 🔁 restore logs if failed
+          if (!success) {
+            logger.warn("⚠ Restoring logs to buffer");
+            this.buffer.unshift(...logsToSend);
+          }
+        }
+
+      } catch (err) {
+        logger.error("❌ Error in interval: " + err.message);
+      }
+    }, this.intervalMs);
+
+    // 🛑 graceful shutdown
+    process.on("SIGINT", async () => {
+      logger.info("🛑 Shutting down... sending remaining logs");
+
+      if (this.buffer.length > 0) {
+        await this.apiClient.submitLogs(this.buffer);
+      }
+
+      process.exit();
+    });
 
     logger.info("✅ Agent running...");
-  }
-
-  async submit(events) {
-    await this.apiClient.submitEvents(events, this.collector.assetId);
   }
 }
 

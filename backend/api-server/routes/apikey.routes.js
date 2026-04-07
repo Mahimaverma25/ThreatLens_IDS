@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const authenticate = require("../middleware/auth.middleware");
 const authorize = require("../middleware/authorize.middleware");
-const { orgIsolation } = require("../middleware/orgIsolation.middleware");
+const asyncHandler = require("../utils/asyncHandler");
 const {
   generateAPIKey,
   listAPIKeys,
@@ -10,22 +10,22 @@ const {
   rotateAPIKey
 } = require("../controllers/apikey.controller");
 
-// All API key routes require auth + org isolation + admin role
-router.use(authenticate, orgIsolation, authorize(["admin"]));
+// All API key routes require authentication, org isolation (app level), and admin role
+router.use(authenticate, authorize(["admin"]));
 
 // List all API keys for organization
-router.get("/", listAPIKeys);
+router.get("/", asyncHandler(listAPIKeys));
 
 // Get specific API key details
-router.get("/:id", getAPIKey);
+router.get("/:id", asyncHandler(getAPIKey));
 
 // Generate new API key for an asset
-router.post("/", generateAPIKey);
+router.post("/", asyncHandler(generateAPIKey));
 
 // Revoke API key
-router.delete("/:id", revokeAPIKey);
+router.delete("/:id", asyncHandler(revokeAPIKey));
 
 // Rotate API key (generate new secret)
-router.post("/:id/rotate", rotateAPIKey);
+router.post("/:id/rotate", asyncHandler(rotateAPIKey));
 
 module.exports = router;

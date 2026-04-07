@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -11,6 +13,7 @@ const requestLogger = require("./middleware/requestLogger");
 const { orgIsolation } = require("./middleware/orgIsolation.middleware");
 const { initSocket } = require("./socket");
 
+// Routes
 const alertRoutes = require("./routes/alerts.routes");
 const authRoutes = require("./routes/auth.routes");
 const logRoutes = require("./routes/logs.routes");
@@ -21,10 +24,18 @@ const assetRoutes = require("./routes/asset.routes");
 const app = express();
 const server = http.createServer(app);
 
-/* ================= IMPORTANT CONFIG ================= */
+/* ================= BASIC CONFIG ================= */
 
-// Required for correct IP handling
 app.set("trust proxy", 1);
+
+/* ================= HEALTH CHECK (VERY IMPORTANT) ================= */
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "OK",
+    message: "ThreatLens Backend Running 🚀"
+  });
+});
 
 /* ================= SECURITY ================= */
 
@@ -48,38 +59,44 @@ app.use(apiLimiter);
 
 connectDB();
 
-/* ================= HEALTH CHECK ================= */
-
-app.get("/", (req, res) => {
-  res.json({ status: "ok", message: "ThreatLens API running" });
-});
-
-app.get("/health", (req, res) => res.json({ status: "ok" }));
-
 /* ================= ROUTES ================= */
 
-// 🔐 Auth routes (JWT based)
+// 🔐 Auth routes
 app.use("/api/auth", authLimiter, authRoutes);
 
-// 🔥 IMPORTANT: Logs route MUST use orgIsolation
-// Supports BOTH:
-// - Agent (x-api-key + x-org-id)
-// - User (JWT)
-app.use("/api/logs", orgIsolation, logRoutes);
+// 🔥 Logs route (agent hits this)
+app.use("/api/logs", logRoutes);
 
-// 🔐 Protected routes (require org context)
+// 🔐 Protected routes
 app.use("/api/alerts", orgIsolation, alertRoutes);
 app.use("/api/dashboard", orgIsolation, dashboardRoutes);
 app.use("/api/assets", orgIsolation, assetRoutes);
-
-// 🔐 Admin routes (should also be protected ideally)
 app.use("/api/admin/api-keys", orgIsolation, apikeyRoutes);
+
+/* ================= 404 HANDLER ================= */
+
+app.use((req, res) => {
+  res.status(404).json({
+    message: "Route not found"
+  });
+});
 
 /* ================= ERROR HANDLER ================= */
 
 app.use((err, req, res, next) => {
-  console.error("❌ Global Error:", err);
-  res.status(500).json({ message: "Internal server error" });
+  console.error("Server Error:", err);
+  res.status(500).json({ error: "server crash" });
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  res.status(err.statusCode || 500).json({
+    message:
+      process.env.NODE_ENV === "production"
+        ? "Internal Server Error"
+        : err.message
+  });
 });
 
 /* ================= SOCKET ================= */
@@ -88,6 +105,6 @@ initSocket(server);
 
 /* ================= SERVER START ================= */
 
-server.listen(config.port, () =>
-  console.log(`🚀 ThreatLens API running on port ${config.port}`)
-);
+server.listen(config.port, () => {
+  console.log(`🚀 ThreatLens API running on port ${config.port}`);
+});

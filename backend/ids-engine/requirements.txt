@@ -2,3 +2,8 @@ Flask==3.0.3
 joblib==1.4.2
 numpy==2.0.2
 scikit-learn==1.5.2
+flask
+flask-cors
+pymongo
+python-dotenv
+requests

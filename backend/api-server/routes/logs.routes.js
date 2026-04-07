@@ -1,8 +1,9 @@
 const router = require("express").Router();
 const multer = require("multer");
-
+const { validateAPIKey, validateIngestPayload } = require("../middleware/ingest.middleware");
 const authenticate = require("../middleware/auth.middleware");
 const authorize = require("../middleware/authorize.middleware");
+const asyncHandler = require("../utils/asyncHandler");
 
 const {
   listLogs,
@@ -21,10 +22,16 @@ const upload = multer({
  * ==============================
  * 🤖 AGENT ROUTE (API KEY BASED)
  * ==============================
- * orgIsolation is already applied in server.js
- * DO NOT add authenticate here
+ * Validates API key with HMAC signature
+ * Validates payload structure
+ * Routes to org isolation context
  */
-router.post("/ingest", ingestLogs);
+router.post(
+  "/ingest",
+  validateAPIKey,
+  validateIngestPayload,
+  asyncHandler(ingestLogs)
+);
 
 /**
  * ==============================
@@ -33,10 +40,10 @@ router.post("/ingest", ingestLogs);
  */
 
 // Get logs
-router.get("/", authenticate, listLogs);
+router.get("/", authenticate, asyncHandler(listLogs));
 
 // Create log manually
-router.post("/", authenticate, createLog);
+router.post("/", authenticate, asyncHandler(createLog));
 
 // Upload logs file
 router.post(
@@ -44,7 +51,7 @@ router.post(
   authenticate,
   authorize(["admin", "analyst"]),
   upload.single("file"),
-  uploadLogs
+  asyncHandler(uploadLogs)
 );
 
 // Simulate traffic
@@ -52,7 +59,7 @@ router.post(
   "/simulate",
   authenticate,
   authorize(["admin", "analyst"]),
-  simulateTraffic
+  asyncHandler(simulateTraffic)
 );
 
 module.exports = router;

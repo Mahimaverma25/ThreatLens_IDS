@@ -1,7 +1,5 @@
 const Log = require("../models/Log");
-const Organization = require("../models/Organization"); // ✅ FIXED (missing import)
 const { parse } = require("csv-parse/sync");
-const config = require("../config/env");
 const { evaluateLog } = require("../services/detector.service");
 const { generateTrafficBatch } = require("../services/traffic.service");
 const { getIo } = require("../socket");
@@ -27,18 +25,18 @@ const listLogs = async (req, res) => {
     if (req.query.search) {
       filters.$or = [
         { message: { $regex: req.query.search, $options: "i" } },
-        { eventType: { $regex: req.query.search, $options: "i" } }
+        { eventType: { $regex: req.query.search, $options: "i" } },
       ];
     }
 
     const [logs, total] = await Promise.all([
       Log.find(filters).sort({ timestamp: -1 }).skip(skip).limit(limit),
-      Log.countDocuments(filters)
+      Log.countDocuments(filters),
     ]);
 
     return res.json({
       data: logs,
-      pagination: { total, page, limit }
+      pagination: { total, page, limit },
     });
   } catch (error) {
     console.error("❌ listLogs error:", error);
@@ -58,7 +56,7 @@ const createLog = async (req, res) => {
       eventType,
       endpoint,
       method,
-      statusCode
+      statusCode,
     } = req.body;
 
     if (!message) {
@@ -80,11 +78,12 @@ const createLog = async (req, res) => {
       eventType,
       endpoint,
       method,
-      statusCode
+      statusCode,
     });
 
     await evaluateLog(log);
 
+    // real time emit does here
     try {
       const io = getIo();
       io.emit("logs:new", log);
@@ -108,45 +107,54 @@ const ingestLogs = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // ✅ Correct payload handling
+    // ✅ FIX 1: get logs from request
     const logsArray = req.body.logs;
 
-    if (!Array.isArray(logsArray)) {
-      return res.status(400).json({
-        message: "Invalid payload: logs array required"
-      });
+    if (!logsArray || !Array.isArray(logsArray)) {
+      return res.status(400).json({ message: "Logs array required" });
     }
 
     console.log(`📦 Incoming logs count: ${logsArray.length}`);
 
-    const stored = [];
-
-    for (const item of logsArray) {
-      if (!item.message) continue;
-
-      const log = await Log.create({
+    // ✅ Format logs properly
+    const formattedLogs = logsArray
+      .filter((item) => item && item.message)
+      .map((item) => ({
         message: item.message,
         level: item.level || "info",
         source: item.source || "agent",
         ip: item.ip || req.ip,
         eventType: item.eventType,
         metadata: item.metadata || {},
-        asset_id: item.asset_id,
-        _org_id: req.orgId, // ✅ CORRECT
-        timestamp: item.timestamp || new Date()
-      });
+        asset_id: item.metadata?.asset_id || "unknown",
+        _org_id: req.orgId,
+        timestamp: item.timestamp || new Date(),
+      }));
 
-      await evaluateLog(log);
-      stored.push(log);
+    if (formattedLogs.length === 0) {
+      return res.status(400).json({ message: "No valid logs to insert" });
     }
+
+    // 🚀 Bulk insert (fast)
+    const stored = await Log.insertMany(formattedLogs);
+
+    // 🔥 IMPORTANT: run detection
+    for (const log of stored) {
+      await evaluateLog(log);
+    }
+
+    // 🔥 Real-time emit
+    try {
+      const io = getIo();
+      stored.forEach((log) => io.emit("logs:new", log));
+    } catch (e) {}
 
     console.log(`✅ Stored logs: ${stored.length}`);
 
     return res.status(201).json({
       success: true,
-      count: stored.length
+      count: stored.length,
     });
-
   } catch (error) {
     console.error("❌ ingestLogs error:", error);
     return res.status(500).json({ message: "Failed to ingest logs" });
@@ -182,23 +190,22 @@ const uploadLogs = async (req, res) => {
       return res.status(400).json({ message: "Invalid file format" });
     }
 
-    const stored = [];
-
-    for (const item of items) {
-      if (!item.message) continue;
-
-      const log = await Log.create({
+    const formattedLogs = items
+      .filter((item) => item && item.message)
+      .map((item) => ({
         message: item.message,
         level: item.level || "info",
         source: item.source || "upload",
         ip: item.ip || req.ip,
         eventType: item.eventType,
         metadata: item.metadata || {},
-        _org_id: req.orgId
-      });
+        _org_id: req.orgId,
+      }));
 
+    const stored = await Log.insertMany(formattedLogs);
+
+    for (const log of stored) {
       await evaluateLog(log);
-      stored.push(log);
     }
 
     return res.status(201).json({ data: stored });
@@ -219,22 +226,21 @@ const simulateTraffic = async (req, res) => {
     const count = Math.min(parseInt(req.query.count || "10"), 200);
     const samples = generateTrafficBatch(count);
 
-    const stored = [];
+    const formattedLogs = samples.map((sample) => ({
+      message: `Traffic sample on port ${sample.port}`,
+      level: "info",
+      source: "simulator",
+      ip: sample.ip,
+      endpoint: sample.endpoint,
+      eventType: "traffic",
+      metadata: sample,
+      _org_id: req.orgId,
+    }));
 
-    for (const sample of samples) {
-      const log = await Log.create({
-        message: `Traffic sample on port ${sample.port}`,
-        level: "info",
-        source: "simulator",
-        ip: sample.ip,
-        endpoint: sample.endpoint,
-        eventType: "traffic",
-        metadata: sample,
-        _org_id: req.orgId
-      });
+    const stored = await Log.insertMany(formattedLogs);
 
+    for (const log of stored) {
       await evaluateLog(log);
-      stored.push(log);
     }
 
     return res.status(201).json({ data: stored });
@@ -249,5 +255,5 @@ module.exports = {
   createLog,
   ingestLogs,
   uploadLogs,
-  simulateTraffic
+  simulateTraffic,
 };
