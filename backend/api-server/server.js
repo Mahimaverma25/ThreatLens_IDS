@@ -28,29 +28,21 @@ const server = http.createServer(app);
 
 app.set("trust proxy", 1);
 
-/* ================= HEALTH CHECK ================= */
-
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "OK",
-    message: "ThreatLens Backend Running 🚀",
-  });
-});
-
 /* ================= SECURITY ================= */
 
 app.use(helmet());
+
 app.use(
   cors({
     origin: config.corsOrigin || "http://localhost:3000",
     credentials: true,
   })
 );
+
 app.use(cookieParser());
 
-/* ================= BODY PARSER (FIXED) ================= */
+/* ================= BODY PARSER ================= */
 
-// 🔥 MUST be before routes
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -65,6 +57,15 @@ app.use(apiLimiter);
 /* ================= DATABASE ================= */
 
 connectDB();
+
+/* ================= HEALTH CHECK ================= */
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "OK",
+    message: "ThreatLens Backend Running 🚀",
+  });
+});
 
 /* ================= ROUTES ================= */
 

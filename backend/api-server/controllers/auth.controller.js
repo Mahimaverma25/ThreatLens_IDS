@@ -4,6 +4,7 @@ const RefreshToken = require("../models/RefreshToken");
 const AuditLog = require("../models/AuditLog");
 const Organization = require("../models/Organization");
 const config = require("../config/env");
+
 const {
   generateAccessToken,
   generateRefreshToken,
@@ -38,7 +39,7 @@ const register = async (req, res) => {
 
     let { email, password, username, orgName } = req.body || {};
 
-    // 🔥 SAFE CHECK
+    // ✅ Safety validation (extra layer)
     if (!email || !password) {
       return res.status(400).json({
         message: "Email and password are required",
@@ -48,17 +49,20 @@ const register = async (req, res) => {
     email = email.trim().toLowerCase();
     password = password.trim();
 
+    // ✅ Check existing user
     const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({ message: "Email already registered" });
     }
 
+    // ✅ Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const orgIdentifier = orgName || email.split("@")[0];
+    // ✅ Org creation
+    const orgIdentifier = (orgName || email.split("@")[0]).toLowerCase();
 
     const org = await Organization.create({
-      org_id: orgIdentifier.toLowerCase(),
+      org_id: orgIdentifier,
       org_name: orgName || username || orgIdentifier,
       org_plan: "starter",
       status: "active",
@@ -73,6 +77,7 @@ const register = async (req, res) => {
       data_retention_days: 30,
     });
 
+    // ✅ Create user
     const user = await User.create({
       email,
       username,
@@ -81,20 +86,27 @@ const register = async (req, res) => {
       _org_id: org._id,
     });
 
-    await AuditLog.create({
-      action: "auth.register",
-      userId: user._id,
-      _org_id: org._id,
-      ip: req.ip,
-      success: true,
-    });
+    // ✅ Audit log (safe)
+    try {
+      await AuditLog.create({
+        action: "auth.register",
+        userId: user._id,
+        _org_id: org._id,
+        ip: req.ip,
+        success: true,
+      });
+    } catch (e) {
+      console.warn("Audit log failed (ignored)");
+    }
 
     return res.status(201).json({
       message: "Registration successful",
       user: user.toJSON(),
     });
+
   } catch (error) {
     console.error("❌ REGISTER ERROR:", error);
+
     return res.status(500).json({
       message: "Registration failed",
       error: config.nodeEnv === "development" ? error.message : undefined,
@@ -106,11 +118,11 @@ const register = async (req, res) => {
 
 const login = async (req, res) => {
   try {
-    console.log("📥 LOGIN BODY:", req.body); // 🔥 DEBUG
+    console.log("📥 LOGIN BODY:", req.body);
 
     let { email, password } = req.body || {};
 
-    // 🔥 HANDLE EMPTY BODY
+    // ✅ Safety validation
     if (!email || !password) {
       return res.status(400).json({
         message: "Email and password are required",
@@ -120,6 +132,7 @@ const login = async (req, res) => {
     email = email.trim().toLowerCase();
     password = password.trim();
 
+    // ✅ Find user
     const user = await User.findOne({ email }).select("+passwordHash");
 
     if (!user) {
@@ -130,16 +143,19 @@ const login = async (req, res) => {
       return res.status(500).json({ message: "Password not set properly" });
     }
 
+    // ✅ Compare password
     const isMatch = await bcrypt.compare(password, user.passwordHash);
 
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid password" });
     }
 
+    // ✅ Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken();
     const expiresAt = getRefreshTokenExpiry();
 
+    // ✅ Store refresh token
     await RefreshToken.create({
       userId: user._id,
       _org_id: user._org_id,
@@ -147,10 +163,12 @@ const login = async (req, res) => {
       expiresAt,
     });
 
+    // ✅ Update login info
     user.lastLoginAt = new Date();
     user.lastLoginIp = req.ip;
     await user.save();
 
+    // ✅ Set cookie
     setRefreshCookie(res, refreshToken, expiresAt);
 
     return res.status(200).json({

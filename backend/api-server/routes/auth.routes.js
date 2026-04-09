@@ -1,8 +1,8 @@
 const router = require("express").Router();
 const { body } = require("express-validator");
 
-// ✅ Correct validator (NOT API key middleware)
-const validate = require("../middleware/validate.middleware");
+// ✅ Correct validator
+const { validateRequest } = require("../middleware/validate.middleware");
 
 const authenticate = require("../middleware/auth.middleware");
 const asyncHandler = require("../utils/asyncHandler");
@@ -38,12 +38,12 @@ router.post(
       .isLength({ min: 2 })
       .withMessage("Username must be at least 2 characters")
   ],
-  validate,
+  validateRequest,   // ✅ FIXED
   asyncHandler(register)
 );
 
 /* ========================
-   LOGIN (FIXED)
+   LOGIN
 ======================== */
 router.post(
   "/login",
@@ -58,7 +58,7 @@ router.post(
       .notEmpty()
       .withMessage("Password is required")
   ],
-  validate,
+  validateRequest,   // ✅ FIXED
   asyncHandler(login)
 );
 

@@ -41,6 +41,6 @@ def handle_error(error):
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("IDS_ENGINE_PORT", "5001"))
+    port = int(os.getenv("IDS_ENGINE_PORT", "8000"))
     debug = os.getenv("IDS_ENGINE_DEBUG", "false").lower() == "true"
     app.run(port=port, debug=debug)

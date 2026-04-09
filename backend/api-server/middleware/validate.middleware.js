@@ -1,12 +1,29 @@
+const { validationResult } = require("express-validator");
 const Organization = require("../models/Organization");
 
-// 🔐 Middleware for API Key Authentication (ONLY for agents/log ingestion)
+/* =========================
+   🔐 REQUEST VALIDATION (FOR AUTH)
+========================= */
+const validateRequest = (req, res, next) => {
+  const errors = validationResult(req);
+
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      errors: errors.array(),
+    });
+  }
+
+  next();
+};
+
+/* =========================
+   🔐 API KEY AUTH (FOR AGENT / LOGS)
+========================= */
 const validateAPIKey = async (req, res, next) => {
   try {
     const apiKey = req.headers["x-api-key"];
     const assetId = req.headers["x-asset-id"];
 
-    // 🔍 Debug (optional)
     console.log("API KEY:", apiKey);
     console.log("ASSET ID:", assetId);
 
@@ -36,7 +53,7 @@ const validateAPIKey = async (req, res, next) => {
       });
     }
 
-    // ✅ Attach org info to request
+    // ✅ Attach org info
     req.org = org;
     req.orgId = org._id;
     req.assetId = assetId;
@@ -51,4 +68,10 @@ const validateAPIKey = async (req, res, next) => {
   }
 };
 
-module.exports = validateAPIKey;
+/* =========================
+   EXPORTS
+========================= */
+module.exports = {
+  validateRequest,
+  validateAPIKey,
+};

@@ -85,8 +85,6 @@ export const auth = {
       password: password.trim(),
     };
 
-    console.log("🔐 Login Payload:", payload);
-
     return api.post("/auth/login", payload);
   },
 
