@@ -1,38 +1,84 @@
 const jwt = require("jsonwebtoken");
 const config = require("../config/env");
 
+/**
+ * Authentication Middleware
+ * Supports:
+ * 1. API Key (for agents / ingestion)
+ * 2. JWT Token (for frontend users)
+ */
 const authenticate = (req, res, next) => {
-const apiKey = req.headers["x-api-key"];
-const authHeader = req.headers.authorization;
+  try {
+    const apiKey = req.headers["x-api-key"];
+    const authHeader = req.headers["authorization"];
 
-```
-// ✅ 1. Allow API Key (for agents / logs ingestion)
-if (apiKey) {
-	if (apiKey === config.apiKey) {
-		req.user = { type: "agent" }; // optional
-		return next();
-	} else {
-		return res.status(401).json({ message: "Invalid API key" });
-	}
-}
+    /* ================= API KEY AUTH ================= */
+    if (apiKey) {
+      if (apiKey === config.apiKey) {
+        req.user = {
+          type: "agent",
+          role: "system",
+        };
+        return next();
+      } else {
+        console.warn("❌ Invalid API Key");
+        return res.status(401).json({
+          success: false,
+          message: "Invalid API key",
+        });
+      }
+    }
 
-// ✅ 2. Allow JWT (for frontend users)
-if (authHeader && authHeader.startsWith("Bearer ")) {
-	const token = authHeader.slice("Bearer ".length).trim();
+    /* ================= JWT AUTH ================= */
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1]; // safer split
 
-	try {
-		const payload = jwt.verify(token, config.jwtSecret);
-		req.user = payload;
-		return next();
-	} catch (error) {
-		return res.status(401).json({ message: "Invalid or expired token" });
-	}
-}
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: "Token missing",
+        });
+      }
 
-// ❌ If neither provided
-return res.status(401).json({ message: "Unauthorized access" });
-```
+      try {
+        const decoded = jwt.verify(token, config.jwtSecret);
 
+        // ✅ Attach user info
+        req.user = decoded;
+
+        return next();
+      } catch (error) {
+        console.error("❌ JWT Error:", error.message);
+
+        // Handle specific JWT errors
+        if (error.name === "TokenExpiredError") {
+          return res.status(401).json({
+            success: false,
+            message: "Token expired",
+          });
+        }
+
+        return res.status(401).json({
+          success: false,
+          message: "Invalid token",
+        });
+      }
+    }
+
+    /* ================= NO AUTH PROVIDED ================= */
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized access",
+    });
+
+  } catch (err) {
+    console.error("🔥 Auth Middleware Error:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error in auth middleware",
+    });
+  }
 };
 
 module.exports = authenticate;
