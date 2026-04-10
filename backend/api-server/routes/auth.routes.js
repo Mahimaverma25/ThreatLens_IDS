@@ -1,9 +1,7 @@
 const router = require("express").Router();
 const { body } = require("express-validator");
 
-// ✅ Correct validator
 const { validateRequest } = require("../middleware/validate.middleware");
-
 const authenticate = require("../middleware/auth.middleware");
 const asyncHandler = require("../utils/asyncHandler");
 
@@ -38,7 +36,7 @@ router.post(
       .isLength({ min: 2 })
       .withMessage("Username must be at least 2 characters")
   ],
-  validateRequest,   // ✅ FIXED
+  validateRequest,
   asyncHandler(register)
 );
 
@@ -58,15 +56,32 @@ router.post(
       .notEmpty()
       .withMessage("Password is required")
   ],
-  validateRequest,   // ✅ FIXED
+  validateRequest,
   asyncHandler(login)
 );
 
 /* ========================
    AUTH ACTIONS
 ======================== */
-router.post("/refresh", asyncHandler(refresh));
-router.post("/logout", asyncHandler(logout));
-router.get("/me", authenticate, asyncHandler(me));
+
+// 🔥 FIX 1: refresh should validate token existence
+router.post(
+  "/refresh",
+  asyncHandler(refresh)
+);
+
+// 🔥 FIX 2: logout should be protected (IMPORTANT)
+router.post(
+  "/logout",
+  authenticate,
+  asyncHandler(logout)
+);
+
+// 🔥 FIX 3: me route already correct
+router.get(
+  "/me",
+  authenticate,
+  asyncHandler(me)
+);
 
 module.exports = router;

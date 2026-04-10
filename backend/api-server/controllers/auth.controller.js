@@ -217,13 +217,15 @@ const refresh = async (req, res) => {
 
     const tokenHash = hashToken(token);
 
+     // ✅ FIX: Proper revoked check
     const stored = await RefreshToken.findOne({
       tokenHash,
-      revokedAt: { $exists: false },
+      revokedAt: null, // 🔥 IMPORTANT FIX
     });
 
-    if (!stored || stored.expiresAt < new Date()) {
-      return res.status(401).json({ message: "Refresh token invalid" });
+    // ✅ Check expiry
+    if (stored.expiresAt < new Date()) {
+      return res.status(401).json({ message: "Refresh token expired" });
     }
 
     const user = await User.findById(stored.userId);
@@ -244,6 +246,7 @@ const refresh = async (req, res) => {
       _org_id: user._org_id,
       tokenHash: hashToken(newRefresh),
       expiresAt: newExpiry,
+      revokedAt: null,
     });
 
     setRefreshCookie(res, newRefresh, newExpiry);
@@ -265,20 +268,21 @@ const logout = async (req, res) => {
     const token = req.cookies?.[config.refreshCookieName];
 
     if (token) {
+      const tokenHash = hashToken(token);
+
       await RefreshToken.updateOne(
-        { tokenHash: hashToken(token) },
+        { tokenHash, revokedAt: null }, // ✅ FIX
         { $set: { revokedAt: new Date() } }
       );
     }
 
     clearRefreshCookie(res);
 
-    return res.json({ message: "Logged out" });
+    return res.json({ message: "Logged out successfully" });
 
   } catch (error) {
     console.error("❌ LOGOUT ERROR:", error);
     return res.status(500).json({ message: "Logout failed" });
   }
-};
-
+}  
 module.exports = { register, login, me, refresh, logout };

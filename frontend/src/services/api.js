@@ -27,48 +27,100 @@ api.interceptors.request.use((config) => {
 
 /* ================= RESPONSE INTERCEPTOR ================= */
 
+let isRefreshing = false;
+let failedQueue = [];
+
+// 🔁 Process queue after refresh
+const processQueue = (error, token = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
 api.interceptors.response.use(
   (response) => {
-    // 🔍 DEBUG SUCCESS
     console.log("✅ API Response:", response.config.url, response.data);
-    return response;
+    return response; 
   },
   async (error) => {
     const originalRequest = error.config;
 
-    // 🔥 DEBUG ERROR (IMPORTANT)
-    console.error("❌ API Error:", {
-      url: originalRequest?.url,
+    // Normalize error for frontend
+    const normalizedError = {
+      message:
+        error.response?.data?.message ||
+        error.message ||
+        "An unknown error occurred",
       status: error.response?.status,
       data: error.response?.data,
+    };
+
+    console.error("❌ API Error:", {
+      url: originalRequest?.url,
+      ...normalizedError,
     });
 
-    // 🔁 HANDLE TOKEN REFRESH
+    // 🚫 Skip auth endpoints
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
-      !originalRequest.url.includes("/auth/login")
+      !originalRequest.url.includes("/auth/login") &&
+      !originalRequest.url.includes("/auth/refresh")
     ) {
+      if (isRefreshing) {
+        // ⏳ Queue requests while refreshing
+        return new Promise((resolve, reject) => {
+          failedQueue.push({
+            resolve: (token) => {
+              originalRequest.headers.Authorization = `Bearer ${token}`;
+              resolve(api(originalRequest));
+            },
+            reject: (err) => reject(err),
+          });
+        });
+      }
+
       originalRequest._retry = true;
+      isRefreshing = true;
 
       try {
-        const refreshRes = await api.post("/auth/refresh");
+        // 🔥 IMPORTANT: use plain axios to avoid interceptor loop
+        const refreshRes = await axios.post(
+          `${api.defaults.baseURL}/auth/refresh`,
+          {},
+          { withCredentials: true }
+        );
+
         const newToken = refreshRes.data.token;
 
         localStorage.setItem("accessToken", newToken);
 
+        processQueue(null, newToken);
+
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api(originalRequest);
+
       } catch (refreshError) {
+        processQueue(refreshError, null);
+
         localStorage.removeItem("accessToken");
         window.location.href = "/login";
+
+        return Promise.reject(refreshError);
+
+      } finally {
+        isRefreshing = false;
       }
     }
 
-    return Promise.reject(error);
+    return Promise.reject(normalizedError);
   }
 );
-
 /* ================= AUTH APIs ================= */
 
 export const auth = {

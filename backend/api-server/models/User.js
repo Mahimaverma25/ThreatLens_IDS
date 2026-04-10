@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema({
-  // Multi-tenant reference (still required)
   _org_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Organization",
@@ -11,7 +10,8 @@ const UserSchema = new mongoose.Schema({
 
   username: {
     type: String,
-    trim: true
+    trim: true,
+    default: ""
   },
 
   email: {
@@ -19,14 +19,14 @@ const UserSchema = new mongoose.Schema({
     required: true,
     lowercase: true,
     trim: true,
-    unique: true,              // ✅ GLOBAL UNIQUE EMAIL
+    unique: true,
     index: true
   },
 
   passwordHash: {
     type: String,
     required: true,
-    select: false              // 🔐 hidden by default
+    select: false // 🔐 hidden by default
   },
 
   role: {
@@ -46,13 +46,21 @@ const UserSchema = new mongoose.Schema({
   }
 });
 
-/* Hide sensitive fields */
+/* 🔐 Clean JSON response */
 UserSchema.set("toJSON", {
   transform: (_, ret) => {
     delete ret.passwordHash;
     delete ret.__v;
     return ret;
   }
+});
+
+/* 🔥 Ensure email always lowercase */
+UserSchema.pre("save", function (next) {
+  if (this.email) {
+    this.email = this.email.toLowerCase();
+  }
+  next();
 });
 
 module.exports = mongoose.model("User", UserSchema);
