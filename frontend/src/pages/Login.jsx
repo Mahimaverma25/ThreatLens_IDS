@@ -8,6 +8,7 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -17,10 +18,38 @@ const Login = () => {
     setLoading(true);
 
     try {
-      await login(email, password);
-      navigate("/");
+      const res = await login(email, password);
+
+      // IMPORTANT: normalize response safely
+      const token = res?.token;
+      const user = res?.user;
+
+      if (!token || !user) {
+        throw new Error("Invalid server response");
+      }
+
+      // store session
+      localStorage.setItem("accessToken", token);
+      localStorage.setItem("user", JSON.stringify(user));
+
+      // update UI context handled inside AuthContext
+      console.log("LOGIN SUCCESS:", user);
+
+      // role-based redirect
+      if (user.role === "admin") {
+        navigate("/");
+      } else {
+        navigate("/logs");
+      }
+
     } catch (err) {
-      setError(err.response?.data?.message || "Login failed");
+      console.error("Login error:", err);
+
+      setError(
+        err?.response?.data?.message ||
+        err?.message ||
+        "Login failed. Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -29,6 +58,7 @@ const Login = () => {
   return (
     <div className="auth-container">
       <div className="auth-card">
+
         <h1>🛡️ ThreatLens</h1>
         <h2>Login</h2>
 
@@ -37,34 +67,40 @@ const Login = () => {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Email</label>
+
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               disabled={loading}
+              autoComplete="email"
             />
           </div>
 
           <div className="form-group">
             <label>Password</label>
+
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               disabled={loading}
+              autoComplete="current-password"
             />
           </div>
 
           <button type="submit" disabled={loading}>
-            {loading ? "Logging in..." : "Login"}
+            {loading ? "🔐 Logging in..." : "Login"}
           </button>
         </form>
 
         <p className="auth-link">
-          Don't have an account? <Link to="/register">Register here</Link>
+          Don't have an account?{" "}
+          <Link to="/register">Register here</Link>
         </p>
+
       </div>
     </div>
   );

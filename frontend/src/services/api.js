@@ -1,26 +1,39 @@
 import axios from "axios";
 
+/* ================= BASE API ================= */
+
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || "http://localhost:5000/api",
   timeout: 10000,
   withCredentials: true,
 });
 
+/* ================= TOKEN HELPERS ================= */
+
+const getToken = () => localStorage.getItem("accessToken");
+
+const setToken = (token) => {
+  if (token) {
+    localStorage.setItem("accessToken", token);
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+  }
+};
+
+const clearToken = () => {
+  localStorage.removeItem("accessToken");
+  delete api.defaults.headers.common.Authorization;
+};
+
 /* ================= REQUEST INTERCEPTOR ================= */
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("accessToken");
+  const token = getToken();
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
-  // 🔍 DEBUG LOG
-  console.log("📤 API Request:", {
-    url: config.url,
-    method: config.method,
-    data: config.data,
-  });
+  console.log("📤 API Request:", config.method?.toUpperCase(), config.url);
 
   return config;
 });
@@ -30,7 +43,6 @@ api.interceptors.request.use((config) => {
 let isRefreshing = false;
 let failedQueue = [];
 
-// 🔁 Process queue after refresh
 const processQueue = (error, token = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
@@ -44,36 +56,32 @@ const processQueue = (error, token = null) => {
 
 api.interceptors.response.use(
   (response) => {
-    console.log("✅ API Response:", response.config.url, response.data);
-    return response; 
+    console.log("✅ API:", response.config.url);
+    return response;
   },
+
   async (error) => {
     const originalRequest = error.config;
 
-    // Normalize error for frontend
-    const normalizedError = {
-      message:
-        error.response?.data?.message ||
-        error.message ||
-        "An unknown error occurred",
-      status: error.response?.status,
-      data: error.response?.data,
-    };
+    if (!originalRequest || !error.response) {
+      return Promise.reject({
+        message: "Network error",
+      });
+    }
 
-    console.error("❌ API Error:", {
-      url: originalRequest?.url,
-      ...normalizedError,
-    });
+    const status = error.response.status;
 
-    // 🚫 Skip auth endpoints
-    if (
-      error.response?.status === 401 &&
-      !originalRequest._retry &&
-      !originalRequest.url.includes("/auth/login") &&
-      !originalRequest.url.includes("/auth/refresh")
-    ) {
+    const isAuthRoute =
+      originalRequest.url?.includes("/auth/login") ||
+      originalRequest.url?.includes("/auth/register") ||
+      originalRequest.url?.includes("/auth/refresh");
+
+    /* ================= HANDLE 401 REFRESH ================= */
+
+    if (status === 401 && !originalRequest._retry && !isAuthRoute) {
+      originalRequest._retry = true;
+
       if (isRefreshing) {
-        // ⏳ Queue requests while refreshing
         return new Promise((resolve, reject) => {
           failedQueue.push({
             resolve: (token) => {
@@ -85,42 +93,58 @@ api.interceptors.response.use(
         });
       }
 
-      originalRequest._retry = true;
       isRefreshing = true;
 
       try {
-        // 🔥 IMPORTANT: use plain axios to avoid interceptor loop
         const refreshRes = await axios.post(
           `${api.defaults.baseURL}/auth/refresh`,
           {},
           { withCredentials: true }
         );
 
-        const newToken = refreshRes.data.token;
+        const newToken = refreshRes.data?.token;
 
-        localStorage.setItem("accessToken", newToken);
+        if (!newToken) throw new Error("Refresh token missing");
+
+        setToken(newToken);
 
         processQueue(null, newToken);
 
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        return api(originalRequest);
 
+        return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
 
-        localStorage.removeItem("accessToken");
-        window.location.href = "/login";
+        clearToken();
 
-        return Promise.reject(refreshError);
+        // clean logout
+        if (typeof window !== "undefined") {
+          window.location.href = "/login";
+        }
 
+        return Promise.reject({
+          message: "Session expired. Please login again.",
+          status: 401,
+        });
       } finally {
         isRefreshing = false;
       }
     }
 
-    return Promise.reject(normalizedError);
+    /* ================= NORMAL ERROR ================= */
+
+    return Promise.reject({
+      message:
+        error.response?.data?.message ||
+        error.message ||
+        "Something went wrong",
+      status,
+      data: error.response?.data,
+    });
   }
 );
+
 /* ================= AUTH APIs ================= */
 
 export const auth = {
@@ -131,14 +155,11 @@ export const auth = {
       username,
     }),
 
-  login: (email, password) => {
-    const payload = {
+  login: (email, password) =>
+    api.post("/auth/login", {
       email: email.trim(),
       password: password.trim(),
-    };
-
-    return api.post("/auth/login", payload);
-  },
+    }),
 
   refresh: () => api.post("/auth/refresh"),
 
@@ -175,8 +196,7 @@ export const logs = {
     return api.post("/logs/upload", formData);
   },
 
-  simulate: (count = 10) =>
-    api.post(`/logs/simulate?count=${count}`),
+  simulate: (count = 10) => api.post(`/logs/simulate?count=${count}`),
 
   ingest: (payload, apiKey) =>
     api.post("/logs/ingest", payload, {

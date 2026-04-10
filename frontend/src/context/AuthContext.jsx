@@ -7,58 +7,97 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+  /* ================= INIT AUTH ================= */
 
-    authApi
-      .me()
-      .then((res) => setUser(res.data.user))
-      .catch(async () => {
+  useEffect(() => {
+    const initAuth = async () => {
+      const token = localStorage.getItem("accessToken");
+
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const meRes = await authApi.me();
+        setUser(meRes.data.user);
+      } catch (err) {
         try {
           const refreshRes = await authApi.refresh();
-          localStorage.setItem("accessToken", refreshRes.data.token);
+
+          const newToken = refreshRes.data.token;
+          localStorage.setItem("accessToken", newToken);
+
           const meRes = await authApi.me();
           setUser(meRes.data.user);
-        } catch (error) {
+        } catch (refreshErr) {
           localStorage.removeItem("accessToken");
+          setUser(null);
         }
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initAuth();
   }, []);
+
+  /* ================= LOGIN ================= */
 
   const login = async (email, password) => {
     const res = await authApi.login(email, password);
-    localStorage.setItem("accessToken", res.data.token);
-    setUser(res.data.user);
+
+    const { token, user } = res.data;
+
+    localStorage.setItem("accessToken", token);
+    setUser(user);
+
     return res.data;
   };
+
+  /* ================= REGISTER ================= */
 
   const register = async (email, password, username) => {
     const res = await authApi.register(email, password, username);
     return res.data;
   };
 
-  const logout = () => {
-    authApi.logout().catch(() => {});
+  /* ================= LOGOUT ================= */
+
+  const logout = async () => {
+    try {
+      await authApi.logout();
+    } catch (err) {
+      console.log("Logout API failed (ignored)");
+    }
+
     localStorage.removeItem("accessToken");
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        register,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
 };
 
+/* ================= HOOK ================= */
+
 export const useAuth = () => {
   const context = React.useContext(AuthContext);
+
   if (!context) {
     throw new Error("useAuth must be used within an AuthProvider");
   }
+
   return context;
 };
