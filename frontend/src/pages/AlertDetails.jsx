@@ -4,23 +4,27 @@ import MainLayout from "../layout/MainLayout";
 import { alerts } from "../services/api";
 import useSocket from "../hooks/useSocket";
 
+const formatBytes = (value) => {
+  const bytes = Number(value || 0);
+
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+};
+
 const AlertDetails = () => {
   const { id } = useParams();
 
   const [alert, setAlert] = useState(null);
   const [status, setStatus] = useState("");
   const [note, setNote] = useState("");
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const token = localStorage.getItem("accessToken");
-
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
-
-  /* ================= FETCH ALERT ================= */
 
   const fetchAlert = useCallback(async () => {
     try {
@@ -34,7 +38,6 @@ const AlertDetails = () => {
       abortRef.current = new AbortController();
 
       const res = await alerts.get(id);
-
       const data = res?.data?.data;
 
       if (!data) throw new Error("No alert found");
@@ -55,22 +58,18 @@ const AlertDetails = () => {
     }
   }, [id]);
 
-  /* ================= SOCKET ================= */
-
   const socketHandlers = useMemo(
     () => ({
       "alerts:update": (updated) => {
         if (updated?._id === id) {
           fetchAlert();
         }
-      },
+      }
     }),
     [fetchAlert, id]
   );
 
   useSocket(token, socketHandlers);
-
-  /* ================= INIT LOAD ================= */
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -78,14 +77,11 @@ const AlertDetails = () => {
 
     return () => {
       isMountedRef.current = false;
-
       if (abortRef.current) {
         abortRef.current.abort();
       }
     };
   }, [fetchAlert]);
-
-  /* ================= UPDATE ALERT ================= */
 
   const handleUpdate = async () => {
     try {
@@ -94,12 +90,10 @@ const AlertDetails = () => {
 
       await alerts.update(id, {
         status,
-        note: note?.trim() || undefined,
+        note: note?.trim() || undefined
       });
 
       setNote("");
-
-      // refresh after update
       fetchAlert();
     } catch (err) {
       console.error("Update error:", err);
@@ -109,7 +103,22 @@ const AlertDetails = () => {
     }
   };
 
-  /* ================= LOADING ================= */
+  const evidenceSummary = useMemo(() => {
+    const relatedLogs = alert?.relatedLogs || [];
+
+    return relatedLogs.reduce(
+      (accumulator, log) => {
+        accumulator.totalBytes += Number(log.metadata?.bytes || 0);
+        accumulator.failedAttempts += Number(log.metadata?.failedAttempts || 0);
+        accumulator.highestRate = Math.max(
+          accumulator.highestRate,
+          Number(log.metadata?.requestRate || 0)
+        );
+        return accumulator;
+      },
+      { totalBytes: 0, failedAttempts: 0, highestRate: 0 }
+    );
+  }, [alert]);
 
   if (loading) {
     return (
@@ -119,28 +128,44 @@ const AlertDetails = () => {
     );
   }
 
-  /* ================= NOT FOUND ================= */
-
   if (!alert) {
     return (
       <MainLayout>
-        <div className="error-message">
-          {error || "Alert not found"}
-        </div>
+        <div className="error-message">{error || "Alert not found"}</div>
       </MainLayout>
     );
   }
 
-  /* ================= UI ================= */
-
   return (
     <MainLayout>
-      <h1>Alert Details</h1>
-      <p>Review the full evidence and manage the alert lifecycle.</p>
+      <section className="command-header">
+        <div>
+          <div className="command-eyebrow">ThreatLens / Alert / Investigation</div>
+          <h1>Alert Details</h1>
+          <p>Review evidence, telemetry, and analyst actions for this security event.</p>
+        </div>
+      </section>
 
       {error && <div className="error-message">{error}</div>}
 
-      {/* ================= OVERVIEW ================= */}
+      <section className="metrics-grid">
+        <div className="metric-card">
+          <span>Severity</span>
+          <strong>{alert.severity}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Status</span>
+          <strong>{alert.status}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Evidence Bytes</span>
+          <strong>{formatBytes(evidenceSummary.totalBytes)}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Highest Request Rate</span>
+          <strong>{evidenceSummary.highestRate}/min</strong>
+        </div>
+      </section>
 
       <div className="card">
         <h3>Overview</h3>
@@ -149,49 +174,44 @@ const AlertDetails = () => {
           <div>
             <strong>Alert ID:</strong> {alert.alertId}
           </div>
-
           <div>
             <strong>Attack Type:</strong> {alert.attackType}
           </div>
-
           <div>
-            <strong>Source IP:</strong> {alert.ip}
+            <strong>Source IP:</strong> <span className="mono-text">{alert.ip}</span>
           </div>
-
           <div>
             <strong>Severity:</strong> {alert.severity}
           </div>
-
           <div>
             <strong>Status:</strong> {alert.status}
           </div>
-
           <div>
-            <strong>Detected:</strong>{" "}
-            {alert.timestamp
-              ? new Date(alert.timestamp).toLocaleString()
-              : "-"}
+            <strong>Confidence:</strong> {Math.round((alert.confidence || 0) * 100)}%
           </div>
-
           <div>
-            <strong>Resolved:</strong>{" "}
-            {alert.resolvedAt
-              ? new Date(alert.resolvedAt).toLocaleString()
-              : "-"}
+            <strong>Risk Score:</strong> {alert.risk_score}
+          </div>
+          <div>
+            <strong>Detected:</strong> {alert.timestamp ? new Date(alert.timestamp).toLocaleString() : "-"}
+          </div>
+          <div>
+            <strong>Resolved:</strong> {alert.resolvedAt ? new Date(alert.resolvedAt).toLocaleString() : "-"}
+          </div>
+          <div>
+            <strong>Related Logs:</strong> {alert.relatedLogs?.length || 0}
+          </div>
+          <div>
+            <strong>Failed Attempts:</strong> {evidenceSummary.failedAttempts}
           </div>
         </div>
       </div>
-
-      {/* ================= ACTIONS ================= */}
 
       <div className="card">
         <h3>Analyst Actions</h3>
 
         <div className="action-row">
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="New">New</option>
             <option value="Acknowledged">Acknowledged</option>
             <option value="Investigating">Investigating</option>
@@ -206,17 +226,11 @@ const AlertDetails = () => {
             onChange={(e) => setNote(e.target.value)}
           />
 
-          <button
-            className="scan-btn"
-            onClick={handleUpdate}
-            disabled={saving}
-          >
+          <button className="scan-btn" onClick={handleUpdate} disabled={saving}>
             {saving ? "Saving..." : "Save"}
           </button>
         </div>
       </div>
-
-      {/* ================= EVIDENCE LOGS ================= */}
 
       <div className="card">
         <h3>Evidence Logs</h3>
@@ -226,8 +240,12 @@ const AlertDetails = () => {
             <thead>
               <tr>
                 <th>Message</th>
-                <th>Level</th>
-                <th>Source</th>
+                <th>Protocol</th>
+                <th>Bytes</th>
+                <th>Flags</th>
+                <th>Dest Port</th>
+                <th>Req Rate</th>
+                <th>Flow Count</th>
                 <th>IP</th>
                 <th>Timestamp</th>
               </tr>
@@ -237,14 +255,14 @@ const AlertDetails = () => {
               {alert.relatedLogs.map((log) => (
                 <tr key={log._id}>
                   <td>{log.message}</td>
-                  <td>{log.level}</td>
-                  <td>{log.source}</td>
-                  <td>{log.ip}</td>
-                  <td>
-                    {log.timestamp
-                      ? new Date(log.timestamp).toLocaleString()
-                      : "-"}
-                  </td>
+                  <td>{log.metadata?.protocol || "-"}</td>
+                  <td>{formatBytes(log.metadata?.bytes)}</td>
+                  <td>{Array.isArray(log.metadata?.flags) ? log.metadata.flags.join(", ") : "-"}</td>
+                  <td className="mono-text">{log.metadata?.destinationPort || log.metadata?.port || "-"}</td>
+                  <td>{log.metadata?.requestRate || "-"}</td>
+                  <td>{log.metadata?.flowCount || "-"}</td>
+                  <td className="ip-cell">{log.ip}</td>
+                  <td>{log.timestamp ? new Date(log.timestamp).toLocaleString() : "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -253,8 +271,6 @@ const AlertDetails = () => {
           <p>No related logs available.</p>
         )}
       </div>
-
-      {/* ================= NOTES ================= */}
 
       <div className="card">
         <h3>Analyst Notes</h3>
@@ -265,9 +281,7 @@ const AlertDetails = () => {
               <li key={`${item.timestamp || idx}-${idx}`}>
                 <div>{item.note}</div>
                 <small>
-                  {item.timestamp
-                    ? new Date(item.timestamp).toLocaleString()
-                    : "-"}
+                  {item.timestamp ? new Date(item.timestamp).toLocaleString() : "-"}
                 </small>
               </li>
             ))}

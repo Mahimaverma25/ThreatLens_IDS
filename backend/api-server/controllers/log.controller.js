@@ -21,11 +21,16 @@ const listLogs = async (req, res) => {
     if (req.query.level) filters.level = req.query.level;
     if (req.query.source) filters.source = req.query.source;
     if (req.query.ip) filters.ip = req.query.ip;
+    if (req.query.protocol) filters["metadata.protocol"] = req.query.protocol;
+    if (req.query.destinationPort) {
+      filters["metadata.destinationPort"] = Number.parseInt(req.query.destinationPort, 10);
+    }
 
     if (req.query.search) {
       filters.$or = [
         { message: { $regex: req.query.search, $options: "i" } },
         { eventType: { $regex: req.query.search, $options: "i" } },
+        { "metadata.protocol": { $regex: req.query.search, $options: "i" } },
       ];
     }
 
@@ -238,12 +243,14 @@ const simulateTraffic = async (req, res) => {
     const samples = generateTrafficBatch(count);
 
     const formattedLogs = samples.map((sample) => ({
-      message: `Traffic sample on port ${sample.port}`,
-      level: "info",
+      message: `${sample.protocol} traffic sample on port ${sample.destinationPort}`,
+      level: sample.severityHint === "Critical" || sample.severityHint === "High" ? "warn" : "info",
       source: "simulator",
       ip: sample.ip,
       endpoint: sample.endpoint,
-      eventType: "traffic",
+      method: sample.method,
+      statusCode: sample.statusCode,
+      eventType: "request",
       metadata: sample,
       _org_id: req.orgId,
     }));

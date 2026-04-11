@@ -1,0 +1,239 @@
+/* ================= LANDING PAGE STYLES ================= */
+
+.landing-container {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.landing-background {
+  width: 100%;
+  min-height: 100vh;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.landing-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    rgba(13, 27, 42, 0.85) 0%,
+    rgba(25, 52, 85, 0.8) 50%,
+    rgba(13, 27, 42, 0.85) 100%
+  );
+  z-index: 1;
+}
+
+.landing-content {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  color: white;
+  max-width: 900px;
+  padding: 40px;
+  animation: fadeInUp 0.8s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ================= HEADER & TITLE ================= */
+
+.landing-header {
+  margin-bottom: 30px;
+}
+
+.landing-title {
+  font-size: 4rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(135deg, #00d4ff, #0099ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 2px 20px rgba(0, 212, 255, 0.3);
+  letter-spacing: 2px;
+}
+
+.landing-subtitle {
+  font-size: 1.5rem;
+  color: #a0d4ff;
+  margin: 15px 0 0 0;
+  font-weight: 300;
+  letter-spacing: 1px;
+}
+
+/* ================= DESCRIPTION ================= */
+
+.landing-description {
+  font-size: 1.1rem;
+  line-height: 1.8;
+  color: #d0e0f0;
+  margin: 30px 0 40px 0;
+  max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ================= CTA BUTTONS ================= */
+
+.landing-cta {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin-bottom: 60px;
+  flex-wrap: wrap;
+}
+
+.cta-button {
+  padding: 16px 40px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.3s ease;
+  display: inline-block;
+  min-width: 180px;
+}
+
+.cta-button.primary {
+  background: linear-gradient(135deg, #00d4ff, #0099ff);
+  color: white;
+  box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+}
+
+.cta-button.primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 15px 40px rgba(0, 212, 255, 0.5);
+}
+
+.cta-button.secondary {
+  background: transparent;
+  color: #00d4ff;
+  border: 2px solid #00d4ff;
+}
+
+.cta-button.secondary:hover {
+  background: rgba(0, 212, 255, 0.1);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2);
+}
+
+/* ================= FEATURE CARDS ================= */
+
+.landing-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 25px;
+  margin-top: 50px;
+  padding-top: 50px;
+  border-top: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.feature-card {
+  background: rgba(13, 27, 42, 0.5);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  padding: 30px;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.feature-card:hover {
+  background: rgba(13, 27, 42, 0.7);
+  border-color: rgba(0, 212, 255, 0.6);
+  transform: translateY(-5px);
+  box-shadow: 0 15px 40px rgba(0, 212, 255, 0.2);
+}
+
+.feature-icon {
+  font-size: 3rem;
+  margin-bottom: 15px;
+}
+
+.feature-card h3 {
+  font-size: 1.3rem;
+  color: #00d4ff;
+  margin: 15px 0;
+  font-weight: 600;
+}
+
+.feature-card p {
+  color: #a0d4ff;
+  line-height: 1.6;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+/* ================= RESPONSIVE DESIGN ================= */
+
+@media (max-width: 768px) {
+  .landing-title {
+    font-size: 2.5rem;
+  }
+
+  .landing-subtitle {
+    font-size: 1.2rem;
+  }
+
+  .landing-content {
+    padding: 30px;
+  }
+
+  .landing-description {
+    font-size: 1rem;
+  }
+
+  .landing-cta {
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .cta-button {
+    min-width: 100%;
+  }
+
+  .landing-features {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-title {
+    font-size: 2rem;
+  }
+
+  .landing-subtitle {
+    font-size: 1rem;
+  }
+
+  .landing-content {
+    padding: 20px;
+  }
+
+  .feature-card {
+    padding: 20px;
+  }
+
+  .feature-icon {
+    font-size: 2.5rem;
+  }
+}

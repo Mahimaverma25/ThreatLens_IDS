@@ -9,6 +9,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./context/ProtectedRoute";
 
+import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
@@ -33,27 +34,34 @@ const RoleRoute = ({ children, allowedRoles }) => {
   return children;
 };
 
+/* ================= HOME ROUTE (LANDING OR DASHBOARD) ================= */
+
+const HomeRoute = () => {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <Landing />;
+  }
+
+  return (
+    <RoleRoute allowedRoles={["admin"]}>
+      <Dashboard />
+    </RoleRoute>
+  );
+};
+
 function App() {
   return (
     <Router>
       <AuthProvider>
         <Routes>
 
+          {/* ================= HOME ================= */}
+          <Route path="/" element={<HomeRoute />} />
+
           {/* ================= PUBLIC ROUTES ================= */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-
-          {/* ================= ADMIN DASHBOARD ================= */}
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <RoleRoute allowedRoles={["admin"]}>
-                  <Dashboard />
-                </RoleRoute>
-              </ProtectedRoute>
-            }
-          />
 
           {/* ================= ALERTS ================= */}
           <Route
