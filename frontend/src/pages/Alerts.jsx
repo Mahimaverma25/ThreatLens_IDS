@@ -24,6 +24,7 @@ const Alerts = () => {
 
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
+  const refreshTimerRef = useRef(null);
 
   /* ================= FETCH ALERTS ================= */
 
@@ -64,8 +65,14 @@ const Alerts = () => {
 
   const socketHandlers = useMemo(
     () => ({
-      "alerts:new": () => fetchAlerts(),
-      "alerts:update": () => fetchAlerts(),
+      "alerts:new": () => {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(fetchAlerts, 300);
+      },
+      "alerts:update": () => {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(fetchAlerts, 300);
+      },
     }),
     [fetchAlerts]
   );
@@ -80,6 +87,7 @@ const Alerts = () => {
 
     return () => {
       isMountedRef.current = false;
+      clearTimeout(refreshTimerRef.current);
 
       if (abortRef.current) {
         abortRef.current.abort();

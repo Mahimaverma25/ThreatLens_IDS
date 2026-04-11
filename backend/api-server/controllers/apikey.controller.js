@@ -1,6 +1,7 @@
 const APIKey = require("../models/APIKey");
 const Asset = require("../models/Asset");
 const AuditLog = require("../models/AuditLog");
+const crypto = require("crypto");
 
 /**
  * Generate a new API key for an asset
@@ -32,12 +33,12 @@ const generateAPIKey = async (req, res) => {
     // Create API key record
     const apiKey = await APIKey.create({
       token,
-      secret_key_hash: require("bcryptjs").hashSync(secret, 12),
+      secret_key_hash: crypto.createHash("sha256").update(secret).digest("hex"),
       _org_id: req.orgId,
       _asset_id: asset_id,
       key_name,
       created_by: req.user.sub,
-      expiresAt: expiration_days 
+      expires_at: expiration_days 
         ? new Date(Date.now() + expiration_days * 24 * 60 * 60 * 1000)
         : null,
       is_active: true
@@ -66,8 +67,8 @@ const generateAPIKey = async (req, res) => {
         secret, // Secret - show only once, user must save it
         key_name,
         asset_id,
-        created_at: apiKey.createdAt,
-        expiresAt: apiKey.expiresAt
+        created_at: apiKey.created_at,
+        expires_at: apiKey.expires_at
       }
     });
   } catch (error) {
@@ -98,10 +99,10 @@ const listAPIKeys = async (req, res) => {
       is_active: key.is_active,
       created_at: key.createdAt,
       created_by: key.created_by,
-      expiresAt: key.expiresAt,
+      expires_at: key.expires_at,
       last_used_at: key.last_used_at,
       usage_count: key.usage_count,
-      is_expired: key.expiresAt && key.expiresAt < new Date()
+      is_expired: key.expires_at && key.expires_at < new Date()
     }));
 
     return res.json({
@@ -139,12 +140,12 @@ const getAPIKey = async (req, res) => {
       key_name: apiKey.key_name,
       asset: apiKey._asset_id,
       is_active: apiKey.is_active,
-      created_at: apiKey.createdAt,
+      created_at: apiKey.created_at,
       created_by: apiKey.created_by,
-      expiresAt: apiKey.expiresAt,
+      expires_at: apiKey.expires_at,
       last_used_at: apiKey.last_used_at,
       usage_count: apiKey.usage_count,
-      is_expired: apiKey.expiresAt && apiKey.expiresAt < new Date()
+      is_expired: apiKey.expires_at && apiKey.expires_at < new Date()
     });
   } catch (error) {
     console.error("GET API KEY ERROR:", error);
@@ -222,11 +223,11 @@ const rotateAPIKey = async (req, res) => {
     const { secret: newSecret } = APIKey.generate();
 
     // Update key
-    apiKey.secret_key_hash = require("bcryptjs").hashSync(newSecret, 12);
+    apiKey.secret_key_hash = crypto.createHash("sha256").update(newSecret).digest("hex");
     apiKey.rotated_at = new Date();
     apiKey.rotated_by = req.user.sub;
     if (expiration_days) {
-      apiKey.expiresAt = new Date(Date.now() + expiration_days * 24 * 60 * 60 * 1000);
+      apiKey.expires_at = new Date(Date.now() + expiration_days * 24 * 60 * 60 * 1000);
     }
     await apiKey.save();
 
@@ -250,7 +251,7 @@ const rotateAPIKey = async (req, res) => {
       secret: newSecret, // New secret - show only once
       key_name: apiKey.key_name,
       rotated_at: apiKey.rotated_at,
-      expiresAt: apiKey.expiresAt
+      expires_at: apiKey.expires_at
     });
   } catch (error) {
     console.error("ROTATE API KEY ERROR:", error);

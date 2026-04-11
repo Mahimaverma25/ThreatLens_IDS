@@ -4,6 +4,14 @@ const config = require("../config/env");
 const apiLimiter = rateLimit({
 	windowMs: config.rateLimitWindowMs,
 	max: config.rateLimitMax,
+	skip: (req) => {
+		const path = req.originalUrl || req.url || "";
+		return (
+			path.startsWith("/api/logs/ingest") ||
+			path.startsWith("/health") ||
+			path.startsWith("/socket.io")
+		);
+	},
 	standardHeaders: true,
 	legacyHeaders: false,
 	message: { message: "Too many requests, please try again later." }

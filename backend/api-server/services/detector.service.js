@@ -14,8 +14,16 @@ const appendRelatedLog = async (alert, logId) => {
   }
 };
 
-const upsertAlert = async ({ attackType, ip, severity, type, relatedLogs }) => {
+const upsertAlert = async ({
+  orgId,
+  attackType,
+  ip,
+  severity,
+  type,
+  relatedLogs
+}) => {
   const existing = await Alert.findOne({
+    _org_id: orgId,
     attackType,
     ip,
     timestamp: { $gte: windowStart() },
@@ -30,6 +38,7 @@ const upsertAlert = async ({ attackType, ip, severity, type, relatedLogs }) => {
   }
 
   return createAlert({
+    _org_id: orgId,
     type,
     attackType,
     ip,
@@ -53,6 +62,7 @@ const evaluateBruteForce = async (log) => {
 
   if (failures >= config.bruteforceThreshold) {
     return upsertAlert({
+      orgId: log._org_id,
       attackType: "Brute Force Login Attempts",
       type: "Brute Force Login Attempts",
       ip: log.ip || "unknown",
@@ -75,6 +85,7 @@ const evaluateUnauthorizedAdminAccess = async (log) => {
   }
 
   return upsertAlert({
+    orgId: log._org_id,
     attackType: "Unauthorized Admin Access",
     type: "Unauthorized Admin Access",
     ip: log.ip || "unknown",
@@ -89,6 +100,7 @@ const evaluateDosBurst = async (log) => {
   }
 
   const count = await Log.countDocuments({
+    _org_id: log._org_id,
     eventType: "request",
     ip: log.ip,
     timestamp: { $gte: new Date(Date.now() - 60 * 1000) }
@@ -96,6 +108,7 @@ const evaluateDosBurst = async (log) => {
 
   if (count >= config.dosThresholdPerMinute) {
     return upsertAlert({
+      orgId: log._org_id,
       attackType: "Request Burst / DoS",
       type: "Request Burst / DoS",
       ip: log.ip || "unknown",
@@ -113,12 +126,14 @@ const evaluateSuspiciousIp = async (log) => {
   }
 
   const distinctEndpoints = await Log.distinct("endpoint", {
+    _org_id: log._org_id,
     ip: log.ip,
     timestamp: { $gte: windowStart() }
   });
 
   if (distinctEndpoints.length >= 10) {
     return upsertAlert({
+      orgId: log._org_id,
       attackType: "Suspicious IP Activity",
       type: "Suspicious IP Activity",
       ip: log.ip || "unknown",

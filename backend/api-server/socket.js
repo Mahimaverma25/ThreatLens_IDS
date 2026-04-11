@@ -7,7 +7,7 @@ const initSocket = (httpServer) => {
 
   ioInstance = new Server(httpServer, {
     cors: {
-      origin: config.corsOrigin,
+      origin: config.corsOrigins,
       credentials: true
     }
   });

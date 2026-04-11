@@ -4,7 +4,10 @@ const { evaluateLog } = require("../services/detector.service");
 
 const requestLogger = morgan(
   (tokens, req, res) => {
-    const status = Number.parseInt(tokens.status(req, res), 10);
+    const rawStatus = tokens.status(req, res);
+    const rawResponseTime = tokens["response-time"](req, res);
+    const status = Number.parseInt(rawStatus || "0", 10) || 0;
+    const responseTimeMs = Number.parseFloat(rawResponseTime || "0") || 0;
     const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
 
     Log.create({
@@ -18,7 +21,7 @@ const requestLogger = morgan(
       statusCode: status,
       eventType: "request",
       metadata: {
-        responseTimeMs: Number.parseInt(tokens["response-time"](req, res), 10)
+        responseTimeMs
       }
     })
       .then((log) => evaluateLog(log))

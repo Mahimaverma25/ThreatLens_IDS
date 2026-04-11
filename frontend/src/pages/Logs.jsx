@@ -25,6 +25,7 @@ const Logs = () => {
 
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
+  const refreshTimerRef = useRef(null);
 
   /* ================= FETCH LOGS ================= */
 
@@ -65,7 +66,10 @@ const Logs = () => {
 
   const socketHandlers = useMemo(
     () => ({
-      "logs:new": fetchLogs,
+      "logs:new": () => {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(fetchLogs, 300);
+      },
     }),
     [fetchLogs]
   );
@@ -80,6 +84,7 @@ const Logs = () => {
 
     return () => {
       isMountedRef.current = false;
+      clearTimeout(refreshTimerRef.current);
 
       if (abortRef.current) {
         abortRef.current.abort();

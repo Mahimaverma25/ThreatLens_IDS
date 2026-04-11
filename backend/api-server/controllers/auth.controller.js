@@ -19,6 +19,8 @@ const setRefreshCookie = (res, token, expiresAt) => {
     httpOnly: true,
     secure: config.refreshCookieSecure,
     sameSite: config.refreshCookieSameSite,
+    domain: config.refreshCookieDomain,
+    path: "/",
     expires: expiresAt,
   });
 };
@@ -28,6 +30,8 @@ const clearRefreshCookie = (res) => {
     httpOnly: true,
     secure: config.refreshCookieSecure,
     sameSite: config.refreshCookieSameSite,
+    domain: config.refreshCookieDomain,
+    path: "/",
   });
 };
 
@@ -35,8 +39,6 @@ const clearRefreshCookie = (res) => {
 
 const register = async (req, res) => {
   try {
-    console.log("📥 REGISTER BODY:", req.body);
-
     let { email, password, username, orgName } = req.body || {};
 
     // ✅ Safety validation (extra layer)
@@ -58,8 +60,20 @@ const register = async (req, res) => {
     // ✅ Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // ✅ Org creation
-    const orgIdentifier = (orgName || email.split("@")[0]).toLowerCase();
+    // ✅ Org creation with unique identifier fallback
+    const baseOrgIdentifier = (orgName || email.split("@")[0])
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 32) || "org";
+
+    let orgIdentifier = baseOrgIdentifier;
+    let suffix = 1;
+    // Prevent duplicate org_id collisions across users.
+    while (await Organization.exists({ org_id: orgIdentifier })) {
+      orgIdentifier = `${baseOrgIdentifier}-${suffix++}`;
+    }
 
     const org = await Organization.create({
       org_id: orgIdentifier,
@@ -68,11 +82,11 @@ const register = async (req, res) => {
       status: "active",
       ingest_quota_per_minute: 1000,
       ingest_quota_per_day: 100000,
-      feature_flags: {
-        real_time_alerts: true,
-        correlation_engine: true,
+      features_enabled: {
         anomaly_detection: false,
-        threat_intel: false,
+        correlation_engine: true,
+        threat_intel_enrichment: false,
+        custom_rules: false,
       },
       data_retention_days: 30,
     });
@@ -118,8 +132,6 @@ const register = async (req, res) => {
 
 const login = async (req, res) => {
   try {
-    console.log("📥 LOGIN BODY:", req.body);
-
     let { email, password } = req.body || {};
 
     // ✅ Safety validation
@@ -223,14 +235,21 @@ const refresh = async (req, res) => {
       revokedAt: null, // 🔥 IMPORTANT FIX
     });
 
+    if (!stored) {
+      clearRefreshCookie(res);
+      return res.status(401).json({ message: "Refresh token invalid" });
+    }
+
     // ✅ Check expiry
     if (stored.expiresAt < new Date()) {
+      clearRefreshCookie(res);
       return res.status(401).json({ message: "Refresh token expired" });
     }
 
     const user = await User.findById(stored.userId);
 
     if (!user) {
+      clearRefreshCookie(res);
       return res.status(401).json({ message: "Invalid user" });
     }
 

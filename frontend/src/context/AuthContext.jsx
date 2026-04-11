@@ -4,7 +4,14 @@ import { auth as authApi } from "../services/api";
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
 
   /* ================= INIT AUTH ================= */
@@ -14,6 +21,7 @@ export const AuthProvider = ({ children }) => {
       const token = localStorage.getItem("accessToken");
 
       if (!token) {
+        localStorage.removeItem("user");
         setLoading(false);
         return;
       }
@@ -21,6 +29,7 @@ export const AuthProvider = ({ children }) => {
       try {
         const meRes = await authApi.me();
         setUser(meRes.data.user);
+        localStorage.setItem("user", JSON.stringify(meRes.data.user));
       } catch (err) {
         try {
           const refreshRes = await authApi.refresh();
@@ -30,8 +39,10 @@ export const AuthProvider = ({ children }) => {
 
           const meRes = await authApi.me();
           setUser(meRes.data.user);
+          localStorage.setItem("user", JSON.stringify(meRes.data.user));
         } catch (refreshErr) {
           localStorage.removeItem("accessToken");
+          localStorage.removeItem("user");
           setUser(null);
         }
       } finally {
@@ -50,6 +61,7 @@ export const AuthProvider = ({ children }) => {
     const { token, user } = res.data;
 
     localStorage.setItem("accessToken", token);
+    localStorage.setItem("user", JSON.stringify(user));
     setUser(user);
 
     return res.data;
@@ -72,6 +84,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     localStorage.removeItem("accessToken");
+    localStorage.removeItem("user");
     setUser(null);
   };
 

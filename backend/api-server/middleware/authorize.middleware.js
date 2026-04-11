@@ -6,15 +6,23 @@ const authorize = (roles = []) => async (req, res, next) => {
   }
 
   if (roles.length > 0 && !roles.includes(req.user.role)) {
-    await Log.create({
-      message: "Unauthorized role access",
-      level: "warn",
-      source: "authz",
-      ip: req.ip,
-      userId: req.user.sub,
-      eventType: "authz.denied",
-      metadata: { requiredRoles: roles, role: req.user.role, path: req.originalUrl }
-    });
+    try {
+      if (req.orgId) {
+        await Log.create({
+          _org_id: req.orgId,
+          message: "Unauthorized role access",
+          level: "warn",
+          source: "authz",
+          ip: req.ip,
+          userId: req.user.sub,
+          eventType: "authz.denied",
+          metadata: { requiredRoles: roles, role: req.user.role, path: req.originalUrl }
+        });
+      }
+    } catch (error) {
+      console.error("[Authorize Log Error]", error);
+    }
+
     return res.status(403).json({ message: "Forbidden" });
   }
 

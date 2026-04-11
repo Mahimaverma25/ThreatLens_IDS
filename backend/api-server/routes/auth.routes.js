@@ -70,12 +70,7 @@ router.post(
   asyncHandler(refresh)
 );
 
-// 🔥 FIX 2: logout should be protected (IMPORTANT)
-router.post(
-  "/logout",
-  authenticate,
-  asyncHandler(logout)
-);
+router.post("/logout", asyncHandler(logout));
 
 // 🔥 FIX 3: me route already correct
 router.get(

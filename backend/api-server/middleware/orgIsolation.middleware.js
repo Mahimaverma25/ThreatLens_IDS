@@ -35,11 +35,13 @@ const orgIsolation = async (req, res, next) => {
     // =========================
     // 👤 2. USER AUTH (JWT)
     // =========================
-    if (!req.user || !req.user._id) {
+    const userId = req.user?._id || req.user?.sub;
+
+    if (!req.user || !userId) {
       return res.status(401).json({ error: "Unauthorized: No user context" });
     }
 
-    const user = await User.findById(req.user._id).populate("_org_id");
+    const user = await User.findById(userId).populate("_org_id");
 
     if (!user) {
       return res.status(401).json({ error: "Unauthorized: User not found" });

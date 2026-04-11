@@ -2,6 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MainLayout from "../layout/MainLayout";
 import { alerts, dashboard, logs } from "../services/api";
 import useSocket from "../hooks/useSocket";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  Legend
+} from "recharts";
+
+const SEVERITY_COLORS = {
+  Critical: "#d7263d",
+  High: "#f46036",
+  Medium: "#f6ae2d",
+  Low: "#3da5d9"
+};
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
@@ -23,6 +45,7 @@ const Dashboard = () => {
   const token = localStorage.getItem("accessToken");
 
   const abortControllerRef = useRef(null);
+  const refreshTimerRef = useRef(null);
 
   /* ================= FETCH STATS ================= */
 
@@ -36,35 +59,51 @@ const Dashboard = () => {
 
       abortControllerRef.current = new AbortController();
 
-      const [alertsRes, logsRes, statsRes, healthRes] = await Promise.all([
+      const [alertsRes, logsRes, statsRes, healthRes] = await Promise.allSettled([
         alerts.list(100),
         logs.list(10),
         dashboard.stats(),
         dashboard.health(),
       ]);
 
-      const alertsData = alertsRes?.data?.data ?? [];
-      const logData = logsRes?.data?.data ?? [];
+      const alertsData =
+        alertsRes.status === "fulfilled" ? alertsRes.value?.data?.data ?? [] : [];
+      const logData =
+        logsRes.status === "fulfilled" ? logsRes.value?.data?.data ?? [] : [];
+      const statsData =
+        statsRes.status === "fulfilled" ? statsRes.value?.data ?? {} : {};
+      const healthData =
+        healthRes.status === "fulfilled" ? healthRes.value?.data ?? {} : {};
 
       const severityCount = (level) =>
         alertsData.filter((a) => a.severity === level).length;
 
       setStats((prev) => ({
         ...prev,
-        totalAlerts: statsRes?.data?.alerts?.total ?? alertsData.length,
+        totalAlerts: statsData?.alerts?.total ?? alertsData.length,
         criticalSeverity:
-          statsRes?.data?.alerts?.critical ?? severityCount("Critical"),
+          statsData?.alerts?.critical ?? severityCount("Critical"),
         highSeverity:
-          statsRes?.data?.alerts?.high ?? severityCount("High"),
+          statsData?.alerts?.high ?? severityCount("High"),
         mediumSeverity:
-          statsRes?.data?.alerts?.medium ?? severityCount("Medium"),
+          statsData?.alerts?.medium ?? severityCount("Medium"),
         recentLogs: logData.slice(0, 5),
         health: {
-          database: healthRes?.data?.database ?? "unknown",
-          idsEngine: healthRes?.data?.idsEngine ?? "unknown",
-          lastDetectionTime: healthRes?.data?.lastDetectionTime ?? null,
+          database: healthData?.database ?? "unknown",
+          idsEngine: healthData?.idsEngine ?? "unknown",
+          lastDetectionTime: healthData?.lastDetectionTime ?? null,
         },
       }));
+
+      const allRequestsFailed =
+        alertsRes.status === "rejected" &&
+        logsRes.status === "rejected" &&
+        statsRes.status === "rejected" &&
+        healthRes.status === "rejected";
+
+      if (allRequestsFailed) {
+        setError("Failed to load dashboard data");
+      }
     } catch (err) {
       console.error("Dashboard error:", err);
       setError("Failed to load dashboard data");
@@ -75,10 +114,58 @@ const Dashboard = () => {
 
   /* ================= SOCKET HANDLERS ================= */
 
+  const severityChartData = useMemo(
+    () => [
+      { name: "Critical", value: stats.criticalSeverity },
+      { name: "High", value: stats.highSeverity },
+      { name: "Medium", value: stats.mediumSeverity },
+      {
+        name: "Low",
+        value: Math.max(
+          0,
+          stats.totalAlerts - stats.criticalSeverity - stats.highSeverity - stats.mediumSeverity
+        )
+      }
+    ],
+    [stats]
+  );
+
+  const sourceChartData = useMemo(() => {
+    const counts = stats.recentLogs.reduce((acc, log) => {
+      const key = log.source || "unknown";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [stats.recentLogs]);
+
+  const timelineData = useMemo(() => {
+    const buckets = new Map();
+
+    stats.recentLogs.forEach((log) => {
+      if (!log.timestamp) {
+        return;
+      }
+
+      const date = new Date(log.timestamp);
+      const key = `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    });
+
+    return [...buckets.entries()].map(([time, count]) => ({ time, count }));
+  }, [stats.recentLogs]);
+
   const socketHandlers = useMemo(
     () => ({
-      "alerts:new": fetchStats,
-      "logs:new": fetchStats,
+      "alerts:new": () => {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(fetchStats, 300);
+      },
+      "logs:new": () => {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(fetchStats, 300);
+      },
     }),
     [fetchStats]
   );
@@ -96,6 +183,7 @@ const Dashboard = () => {
 
     return () => {
       clearInterval(interval);
+      clearTimeout(refreshTimerRef.current);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -187,6 +275,60 @@ const Dashboard = () => {
         ) : (
           <p>No logs yet.</p>
         )}
+      </div>
+
+      <div className="card">
+        <h3>Threat Severity Distribution</h3>
+        <div style={{ width: "100%", height: 300 }}>
+          <ResponsiveContainer>
+            <PieChart>
+              <Pie
+                data={severityChartData}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={65}
+                outerRadius={100}
+                paddingAngle={3}
+              >
+                {severityChartData.map((entry) => (
+                  <Cell key={entry.name} fill={SEVERITY_COLORS[entry.name] || "#999"} />
+                ))}
+              </Pie>
+              <Tooltip />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Log Source Activity</h3>
+        <div style={{ width: "100%", height: 300 }}>
+          <ResponsiveContainer>
+            <BarChart data={sourceChartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" />
+              <YAxis allowDecimals={false} />
+              <Tooltip />
+              <Bar dataKey="value" fill="#2f7ed8" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Event Timeline (Recent)</h3>
+        <div style={{ width: "100%", height: 280 }}>
+          <ResponsiveContainer>
+            <LineChart data={timelineData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="time" />
+              <YAxis allowDecimals={false} />
+              <Tooltip />
+              <Line type="monotone" dataKey="count" stroke="#16a34a" strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {/* ================= REFRESH BUTTON ================= */}

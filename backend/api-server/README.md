@@ -55,3 +55,79 @@ npm start
 ## Integration
 - Connects to the Python IDS engine at the URL set in `IDS_ENGINE_URL`
 - Designed to work with the ThreatLens frontend and agent
+
+# Backend folder structure
+```
+
+ThreatLens/
+└── backend/
+    └── api-server/
+        │
+        ├── src/                         # Main source code (keep everything inside src)
+        │
+        │   ├── config/                  # Configuration files
+        │   │   ├── db.js                # MongoDB connection
+        │   │   ├── env.js               # Environment variable loader
+        │   │   └── constants.js         # App constants (roles, status, etc.)
+        │
+        │   ├── controllers/             # Handles request logic
+        │   │   ├── auth.controller.js
+        │   │   ├── log.controller.js
+        │   │   └── user.controller.js
+        │
+        │   ├── routes/                  # API routes
+        │   │   ├── auth.routes.js
+        │   │   ├── log.routes.js
+        │   │   └── user.routes.js
+        │
+        │   ├── models/                  # MongoDB schemas
+        │   │   ├── User.js
+        │   │   ├── Log.js
+        │   │   ├── RefreshToken.js
+        │   │   └── Alert.js             # Optional: separate alerts
+        │
+        │   ├── middleware/              # Middlewares
+        │   │   ├── auth.middleware.js   # JWT verification
+        │   │   ├── error.middleware.js  # Global error handler
+        │   │   ├── rateLimiter.js       # Prevent 429 spam
+        │   │   └── validation.middleware.js
+        │
+        │   ├── services/                # Business logic
+        │   │   ├── detection.service.js # Connect to Python IDS
+        │   │   ├── auth.service.js
+        │   │   └── log.service.js
+        │
+        │   ├── utils/                   # Helper functions
+        │   │   ├── logger.js            # Winston logger
+        │   │   ├── generateToken.js     # JWT token generator
+        │   │   ├── hash.js              # Password hashing
+        │   │   └── response.js          # Standard API responses
+        │
+        │   ├── validators/              # Request validation schemas
+        │   │   ├── auth.validator.js
+        │   │   └── log.validator.js
+        │
+        │   ├── jobs/                    # Background jobs (optional but powerful)
+        │   │   ├── cleanup.job.js       # Delete old logs
+        │   │   └── alert.job.js         # Process alerts
+        │
+        │   ├── docs/                    # API documentation (optional)
+        │   │   └── swagger.json
+        │
+        │   ├── app.js                   # Express app setup
+        │   └── server.js                # Entry point
+        │
+        ├── tests/                      # Testing (optional but recommended)
+        │   ├── auth.test.js
+        │   └── log.test.js
+        │
+        ├── .env                        # Environment variables
+        ├── .env.example                # Sample env file
+        ├── .gitignore
+        ├── package.json
+        ├── package-lock.json
+        ├── README.md
+        └── nodemon.json                # Dev config
+
+```
+

@@ -1,41 +1,14 @@
 const jwt = require("jsonwebtoken");
 const config = require("../config/env");
 
-/**
- * Authentication Middleware
- * Supports:
- * 1. API Key (agents)
- * 2. JWT (users)
- */
 const authenticate = (req, res, next) => {
   try {
-    const apiKey = req.headers["x-api-key"];
     const authHeader = req.headers["authorization"];
 
-    /* ================= API KEY AUTH ================= */
-    if (apiKey) {
-      if (apiKey === config.apiKey) {
-        req.user = {
-          type: "agent",
-          role: "system",
-        };
-        return next();
-      }
-
-      console.warn("❌ Invalid API Key");
-      return res.status(401).json({
-        success: false,
-        message: "Invalid API key",
-      });
-    }
-
     /* ================= JWT AUTH ================= */
-    let token = null;
-
-    // ✅ Extract token safely
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.split(" ")[1];
-    }
+    const token = authHeader && authHeader.startsWith("Bearer ")
+      ? authHeader.split(" ")[1]
+      : null;
 
     if (!token) {
       return res.status(401).json({
@@ -45,12 +18,22 @@ const authenticate = (req, res, next) => {
     }
 
     try {
-      const decoded = jwt.verify(token, config.jwtSecret);
+      const decoded = jwt.verify(token, config.jwtSecret, {
+        algorithms: ["HS256"],
+      });
+      const userId = decoded.sub || decoded.id || decoded._id;
 
-      // ✅ Normalize user structure
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid token payload",
+        });
+      }
+
       req.user = {
         ...decoded,
-        sub: decoded.sub || decoded.id || decoded._id,
+        sub: userId,
+        _id: userId,
       };
 
       return next();

@@ -34,7 +34,7 @@ const APIKeySchema = new mongoose.Schema({
   },
 
   // Friendly name for this key
-  name: {
+  key_name: {
     type: String,
     trim: true
   },
@@ -87,8 +87,11 @@ APIKeySchema.statics.generate = function(org_id, asset_id, name) {
 };
 
 // Verify HMAC signature
-APIKeySchema.methods.verifySignature = function(message, signature) {
-  const computed = crypto.createHmac("sha256", this.secret_key).update(message).digest("hex");
+APIKeySchema.methods.verifySignature = function(payload, secret, signature) {
+  const computed = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
   return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
 };
 

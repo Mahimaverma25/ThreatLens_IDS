@@ -1,4 +1,5 @@
 const axios = require("axios");
+const crypto = require("crypto");
 require("dotenv").config();
 
 const apiClient = axios.create({
@@ -12,9 +13,24 @@ const apiClient = axios.create({
 
 async function sendEvent(payload) {
   try {
+    const timestamp = Date.now().toString();
+    const body = JSON.stringify(payload);
+    const signature = crypto
+      .createHmac("sha256", process.env.THREATLENS_API_SECRET || "")
+      .update(`${timestamp}.${body}`)
+      .digest("hex");
+
     const response = await apiClient.post(
-      "/api/ingest/v1/ingest",
-      payload
+      "/api/logs/ingest",
+      payload,
+      {
+        headers: {
+          "x-api-secret": process.env.THREATLENS_API_SECRET,
+          "x-timestamp": timestamp,
+          "x-signature": signature,
+          "x-asset-id": process.env.ASSET_ID
+        }
+      }
     );
 
     console.log("✅ Event sent:", response.data);

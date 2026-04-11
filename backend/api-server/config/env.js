@@ -7,16 +7,27 @@ const getNumber = (value, fallback) => {
 	return Number.isNaN(parsed) ? fallback : parsed;
 };
 
+const getList = (value, fallback) => {
+	if (!value || !value.trim()) {
+		return fallback;
+	}
+
+	return value
+		.split(",")
+		.map((item) => item.trim())
+		.filter(Boolean);
+};
+
 module.exports = {
 	nodeEnv: process.env.NODE_ENV || "development",
-	port: getNumber(process.env.PORT, 3000),
+	port: getNumber(process.env.PORT, 5000),
 	mongoUri: process.env.MONGO_URI || "mongodb://127.0.0.1:27017/threatlens",
 	jwtSecret: process.env.JWT_SECRET || "change-me",
 	jwtExpiresIn: process.env.JWT_EXPIRES_IN || "1h",
 	refreshTokenSecret: process.env.REFRESH_TOKEN_SECRET || "change-me-too",
 	refreshTokenExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || "30d",
-	corsOrigin: process.env.CORS_ORIGIN || "http://localhost:3000",
-	idsEngineUrl: process.env.IDS_ENGINE_URL || "http://localhost:5001",
+	corsOrigins: getList(process.env.CORS_ORIGIN, ["http://localhost:3000"]),
+	idsEngineUrl: process.env.IDS_ENGINE_URL || "http://localhost:8000",
 	rateLimitWindowMs: getNumber(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
 	rateLimitMax: getNumber(process.env.RATE_LIMIT_MAX, 100),
 	authRateLimitMax: getNumber(process.env.AUTH_RATE_LIMIT_MAX, 15),

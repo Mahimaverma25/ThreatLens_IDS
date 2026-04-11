@@ -20,17 +20,11 @@ const Login = () => {
     try {
       const res = await login(email, password);
 
-      // IMPORTANT: normalize response safely
-      const token = res?.token;
       const user = res?.user;
 
-      if (!token || !user) {
+      if (!user) {
         throw new Error("Invalid server response");
       }
-
-      // store session
-      localStorage.setItem("accessToken", token);
-      localStorage.setItem("user", JSON.stringify(user));
 
       // update UI context handled inside AuthContext
       console.log("LOGIN SUCCESS:", user);

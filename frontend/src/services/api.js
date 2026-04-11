@@ -3,7 +3,7 @@ import axios from "axios";
 /* ================= BASE API ================= */
 
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || "http://localhost:5000/api",
+  baseURL: process.env.REACT_APP_API_URL || "/api",
   timeout: 10000,
   withCredentials: true,
 });
@@ -24,6 +24,15 @@ const clearToken = () => {
   delete api.defaults.headers.common.Authorization;
 };
 
+const bootstrapToken = () => {
+  const token = getToken();
+  if (token) {
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+  }
+};
+
+bootstrapToken();
+
 /* ================= REQUEST INTERCEPTOR ================= */
 
 api.interceptors.request.use((config) => {
@@ -32,8 +41,6 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-
-  console.log("📤 API Request:", config.method?.toUpperCase(), config.url);
 
   return config;
 });
@@ -56,7 +63,6 @@ const processQueue = (error, token = null) => {
 
 api.interceptors.response.use(
   (response) => {
-    console.log("✅ API:", response.config.url);
     return response;
   },
 
@@ -64,9 +70,7 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     if (!originalRequest || !error.response) {
-      return Promise.reject({
-        message: "Network error",
-      });
+      return Promise.reject(error);
     }
 
     const status = error.response.status;
@@ -96,10 +100,9 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const refreshRes = await axios.post(
-          `${api.defaults.baseURL}/auth/refresh`,
-          {},
-          { withCredentials: true }
+        const refreshRes = await api.post(
+          "/auth/refresh",
+          {}
         );
 
         const newToken = refreshRes.data?.token;
@@ -117,31 +120,23 @@ api.interceptors.response.use(
         processQueue(refreshError, null);
 
         clearToken();
+        localStorage.removeItem("user");
 
-        // clean logout
+        // clean logout redirect for protected routes only
         if (typeof window !== "undefined") {
-          window.location.href = "/login";
+          const currentPath = window.location.pathname;
+          if (!["/login", "/register"].includes(currentPath)) {
+            window.location.href = "/login";
+          }
         }
 
-        return Promise.reject({
-          message: "Session expired. Please login again.",
-          status: 401,
-        });
+        return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
       }
     }
 
-    /* ================= NORMAL ERROR ================= */
-
-    return Promise.reject({
-      message:
-        error.response?.data?.message ||
-        error.message ||
-        "Something went wrong",
-      status,
-      data: error.response?.data,
-    });
+    return Promise.reject(error);
   }
 );
 

@@ -95,8 +95,6 @@ OrganizationSchema.pre("save", function (next) {
 /* ================= INDEXES ================= */
 
 // Keep indexes ONLY here (not inside fields)
-OrganizationSchema.index({ org_id: 1 });
 OrganizationSchema.index({ status: 1 });
-OrganizationSchema.index({ agent_api_key: 1 });
 
 module.exports = mongoose.model("Organization", OrganizationSchema);

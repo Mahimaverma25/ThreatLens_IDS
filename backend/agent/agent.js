@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const axios = require("axios");
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const winston = require("winston");
 
@@ -25,8 +26,8 @@ const logger = winston.createLogger({
 
 const config = {
   apiUrl: process.env.THREATLENS_API_URL || "http://localhost:5000", // ✅ FIXED
+  apiKey: process.env.THREATLENS_API_KEY || "",
   apiSecret: process.env.THREATLENS_API_SECRET || "tlk_secret_dev",
-  orgId: process.env.ORG_ID || "69c69322158c10ad1914c0b3",
   assetId: process.env.ASSET_ID || "default-asset",
 
   intervalMs: 2000,
@@ -38,8 +39,9 @@ const config = {
 
 class APIClient {
   constructor(config) {
+    this.apiKey = config.apiKey;
     this.apiSecret = config.apiSecret;
-    this.orgId = config.orgId;
+    this.assetId = config.assetId;
     this.maxRetries = config.maxRetries;
 
     this.client = axios.create({
@@ -50,8 +52,20 @@ class APIClient {
 
   async submitLogs(logs, attempt = 1) {
     try {
+      if (!this.apiKey || !this.apiSecret) {
+        logger.error("❌ Missing THREATLENS_API_KEY or THREATLENS_API_SECRET");
+        return false;
+      }
+
       // ✅ MATCH BACKEND FORMAT
-      const payload = {logs}; // CRITICAL: wrap in "logs" key to match backend expectation
+      const payload = { logs }; // CRITICAL: wrap in "logs" key to match backend expectation
+      const body = JSON.stringify(payload);
+      const timestamp = Date.now().toString();
+      const signature = crypto
+        .createHmac("sha256", this.apiSecret)
+        .update(`${timestamp}.${body}`)
+        .digest("hex");
+
       logger.info(`📤 Sending ${logs.length} logs (attempt ${attempt})`);
 
       const response = await this.client.post(
@@ -60,9 +74,11 @@ class APIClient {
         {
           headers: {
             "Content-Type": "application/json",
-            // "x-api-key": this.apiSecret,
-            "x-api-key": "tlk_secret_dev_123456",
-            "x-org-id": this.orgId
+            "x-api-key": this.apiKey,
+            "x-api-secret": this.apiSecret,
+            "x-timestamp": timestamp,
+            "x-signature": signature,
+            "x-asset-id": this.assetId,
           }
         }
       );

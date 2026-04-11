@@ -6,6 +6,7 @@ import {
 } from "react-router-dom";
 
 import { AuthProvider } from "./context/AuthContext";
+import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./context/ProtectedRoute";
 
 import Login from "./pages/Login";
@@ -21,12 +22,12 @@ import "./App.css";
 /* ================= ROLE-BASED WRAPPER ================= */
 
 const RoleRoute = ({ children, allowedRoles }) => {
-  const user = JSON.parse(localStorage.getItem("user"));
+  const { user } = useAuth();
 
   if (!user) return <Navigate to="/login" />;
 
   if (!allowedRoles.includes(user.role)) {
-    return <Navigate to="/unauthorized" />;
+    return <Navigate to="/logs" />;
   }
 
   return children;
@@ -82,7 +83,7 @@ function App() {
             path="/logs"
             element={
               <ProtectedRoute>
-                <RoleRoute allowedRoles={["admin", "analyst", "viewer"]}>
+                <RoleRoute allowedRoles={["admin", "analyst", "user"]}>
                   <Logs />
                 </RoleRoute>
               </ProtectedRoute>

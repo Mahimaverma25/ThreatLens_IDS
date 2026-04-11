@@ -26,7 +26,7 @@ const AssetSchema = new mongoose.Schema({
   // Type of asset
   asset_type: {
     type: String,
-    enum: ["web_server", "api_server", "database", "load_balancer", "firewall", "other"],
+    enum: ["agent", "web_server", "api_server", "database", "load_balancer", "firewall", "other"],
     default: "web_server"
   },
 

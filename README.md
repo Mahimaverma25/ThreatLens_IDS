@@ -15,7 +15,7 @@ A comprehensive **IDS (Intrusion Detection System)** platform combining real-tim
 ```bash
 cd backend/api-server
 npm install
-npm run dev  # Starts on http://localhost:3000
+npm run dev  # Starts on http://localhost:5000
 ```
 
 ### 2. Start Agent (Event Collector)
@@ -36,7 +36,7 @@ npm start  # Starts on http://localhost:3000
 ```bash
 cd backend/ids-engine
 pip install -r requirements.txt
-python app.py  # Starts on http://localhost:5001
+python app.py  # Starts on http://localhost:8000
 ```
 
 Or use the batch script:
@@ -97,7 +97,7 @@ The agent uses **API Key + HMAC-SHA256** signature authentication:
    
    Then update `backend/agent/.env`:
    ```env
-   THREATLENS_API_URL=http://localhost:3000
+   THREATLENS_API_URL=http://localhost:5000
    THREATLENS_API_KEY=<token-from-setup-script>
    THREATLENS_API_SECRET=tlk_secret_dev
    ASSET_ID=agent-001
@@ -122,7 +122,7 @@ See: [FIX_401_INVALID_API_KEY.md](FIX_401_INVALID_API_KEY.md)
 
 ### 2. Frontend Can't Connect to Backend
 **Issue**: Frontend proxy pointing to wrong port
-**Fix**: Ensure `frontend/package.json` has `"proxy": "http://localhost:3000"`
+**Fix**: Ensure `frontend/package.json` has `"proxy": "http://localhost:5000"`
 
 ### 3. MongoDB Connection Failed
 **Fix**: Ensure MongoDB is running and MONGO_URI in `.env` is correct:
@@ -189,7 +189,7 @@ cd backend/agent && npm test
 ### Manual Testing
 ```bash
 # Test API endpoint
-curl -X GET http://localhost:3000/api/dashboard/stats \
+curl -X GET http://localhost:5000/api/dashboard/stats \
   -H "Authorization: Bearer <jwt-token>"
 
 # Check agent connection
@@ -207,13 +207,13 @@ Create `.env` files in each directory:
 MONGO_URI=mongodb://localhost:27017/threatLens
 JWT_SECRET=your-jwt-secret-key
 JWT_EXPIRY=7d
-PORT=3000
+PORT=5000
 NODE_ENV=development
 ```
 
 **backend/agent/.env**:
 ```env
-THREATLENS_API_URL=http://localhost:3000
+THREATLENS_API_URL=http://localhost:5000
 THREATLENS_API_KEY=<from-setup-script>
 THREATLENS_API_SECRET=tlk_secret_dev
 ASSET_ID=agent-001
@@ -223,7 +223,7 @@ LOG_LEVEL=info
 
 **frontend/.env** (optional):
 ```env
-REACT_APP_API_URL=http://localhost:3000
+REACT_APP_API_URL=http://localhost:5000/api
 ```
 
 ---

@@ -31,12 +31,12 @@ if not exist ".env" (
     echo  Creating .env file...
     (
         echo NODE_ENV=development
-        echo PORT=3000
+        echo PORT=5000
         echo MONGO_URI=mongodb://127.0.0.1:27017/threatlens
         echo JWT_SECRET=dev-secret-change-in-production
         echo REFRESH_TOKEN_SECRET=dev-refresh-secret
-        echo CORS_ORIGIN=http://localhost:5000
-        echo IDS_ENGINE_URL=http://localhost:5000
+        echo CORS_ORIGIN=http://localhost:3000
+        echo IDS_ENGINE_URL=http://localhost:8000
     ) > .env
     echo  ✓ Created .env
 ) else (
@@ -51,7 +51,7 @@ timeout /t 3 /nobreak
 REM Setup API Key
 echo.
 echo [3/5] Creating API key in database...
-node setup-api-key.js
+node setup-dev-keys.js
 if !ERRORLEVEL! neq 0 (
     echo  ⚠ Warning: Setup script had issues, but continuing...
 )
@@ -88,8 +88,8 @@ echo.
 echo [5/5] Setting up Frontend...
 cd /d "d:\Major Project\ThreatLens\frontend"
 
-echo  Starting Frontend on port 3001...
-start /B "ThreatLens Frontend" cmd /k "npm start"
+echo  Starting Frontend on port 3000...
+start /B "ThreatLens Frontend" cmd /k "set PORT=3000&& npm start"
 
 echo.
 echo +---------------------------------------------------------------------------+
@@ -97,9 +97,9 @@ echo ^| ✓ All services started!                                               
 echo +---------------------------------------------------------------------------+
 echo.
 echo URLs:
-echo   Dashboard:  http://localhost:5000
+echo   Dashboard:  http://localhost:3000
 echo   API Server: http://localhost:5000/api
-echo   Frontend:   http://localhost:5001 (if backend route fails)
+echo   Frontend:   http://localhost:3000
 echo.
 echo Logs:
 echo   API Server:  [ThreatLens API Server] window
@@ -108,7 +108,7 @@ echo   Frontend:    [ThreatLens Frontend] window
 echo.
 echo Next steps:
 echo   1. Wait 10 seconds for frontend to compile
-echo   2. Open http://localhost:5000 in browser
+echo   2. Open http://localhost:3000 in browser
 echo   3. Click "Register" and create account
 echo   4. Watch dashboard update as agent sends events
 echo.

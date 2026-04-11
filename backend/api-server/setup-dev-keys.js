@@ -25,10 +25,7 @@ async function setupDevKeys() {
     const mongoUri = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/threatlens";
     console.log(`📡 Connecting to MongoDB: ${mongoUri}`);
     
-    await mongoose.connect(mongoUri, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true
-    });
+    await mongoose.connect(mongoUri);
     console.log("✅ Connected to MongoDB\n");
 
     // Create test organization
@@ -62,7 +59,8 @@ async function setupDevKeys() {
         asset_id: "agent-001",
         asset_name: "Test Agent",
         asset_type: "agent",
-        status: "online",
+        status: "active",
+        agent_status: "online",
         ip_address: "127.0.0.1",
         hostname: "test-agent"
       });
@@ -82,42 +80,46 @@ async function setupDevKeys() {
     });
 
     let apiKey;
+    let generatedSecret = null;
     if (existingKey) {
       console.log(`⚠️  Active API key already exists for this asset`);
-      console.log(`   Token: ${existingKey.token}`);
-      console.log(`   ⚠️  We cannot retrieve the secret (it's hashed)`);
-      console.log(`   Please delete the old key and create a new one if needed.\n`);
-      apiKey = existingKey;
-    } else {
-      // Generate token and secret
-      const token = `tlk_${org._id.toString().slice(-8)}_${crypto.randomBytes(16).toString("hex")}`;
-      const secret = crypto.randomBytes(32).toString("hex");
-      const secretHash = crypto.createHash("sha256").update(secret).digest("hex");
-
-      apiKey = await APIKey.create({
-        token,
-        secret_key_hash: secretHash,
-        _org_id: org._id,
-        _asset_id: asset._id,
-        key_name: "Agent Test Key",
-        is_active: true,
-        expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year
-      });
-
-      console.log(`✅ Created API key: ${apiKey._id}`);
-      console.log(`\n📋 API KEY CREDENTIALS (Save these!):\n`);
-      console.log(`   Token:  ${token}`);
-      console.log(`   Secret: ${secret}`);
-      console.log(`   Asset:  ${asset.asset_id}`);
+      console.log(`   Deactivating old key: ${existingKey.token}`);
+      existingKey.is_active = false;
+      await existingKey.save();
     }
 
+    // Generate token and secret
+    const token = `tlk_${org._id.toString().slice(-8)}_${crypto.randomBytes(16).toString("hex")}`;
+    const secret = crypto.randomBytes(32).toString("hex");
+    const secretHash = crypto.createHash("sha256").update(secret).digest("hex");
+    generatedSecret = secret;
+
+    apiKey = await APIKey.create({
+      token,
+      secret_key_hash: secretHash,
+      _org_id: org._id,
+      _asset_id: asset._id,
+      key_name: "Agent Test Key",
+      is_active: true,
+      expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year
+    });
+
+    console.log(`✅ Created API key: ${apiKey._id}`);
+    console.log(`\n📋 API KEY CREDENTIALS (Save these!):\n`);
+    console.log(`   Token:  ${token}`);
+    console.log(`   Secret: ${secret}`);
+    console.log(`   Asset:  ${asset.asset_id}`);
+
     // Display summary
+    const apiPort = process.env.PORT || "5000";
+    const apiUrl = `http://localhost:${apiPort}`;
+
     console.log(`\n${'='.repeat(60)}`);
     console.log("📊 SETUP COMPLETE - Use these values in your agent .env:");
     console.log(`${'='.repeat(60)}\n`);
-    console.log("THREATLENS_API_URL=http://localhost:3000");
+    console.log(`THREATLENS_API_URL=${apiUrl}`);
     console.log(`THREATLENS_API_KEY=${apiKey.token}`);
-    console.log(`THREATLENS_API_SECRET=tlk_secret_dev`);
+    console.log(`THREATLENS_API_SECRET=${generatedSecret}`);
     console.log(`ASSET_ID=${asset.asset_id}`);
     console.log(`\n${'='.repeat(60)}\n`);
 

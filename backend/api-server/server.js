@@ -8,6 +8,7 @@ const http = require("http");
 
 const config = require("./config/env");
 const { connectDB } = require("./config/db");
+const authenticate = require("./middleware/auth.middleware");
 const { apiLimiter, authLimiter } = require("./middleware/rateLimit");
 const requestLogger = require("./middleware/requestLogger");
 const { orgIsolation } = require("./middleware/orgIsolation.middleware");
@@ -16,10 +17,11 @@ const { initSocket } = require("./socket");
 // Routes
 const alertRoutes = require("./routes/alerts.routes");
 const authRoutes = require("./routes/auth.routes");
-const logRoutes = require("./routes/logs.routes");
+const logRoutes = require("./routes/log.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 const apikeyRoutes = require("./routes/apikey.routes");
 const assetRoutes = require("./routes/asset.routes");
+const userRoutes = require("./routes/user.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -34,7 +36,17 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: config.corsOrigin || "http://localhost:3000",
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (config.corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS origin not allowed"));
+    },
     credentials: true,
   })
 );
@@ -43,8 +55,8 @@ app.use(cookieParser());
 
 /* ================= BODY PARSER ================= */
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: config.bodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: config.bodyLimit }));
 
 /* ================= LOGGER ================= */
 
@@ -53,10 +65,6 @@ app.use(requestLogger);
 /* ================= RATE LIMIT ================= */
 
 app.use(apiLimiter);
-
-/* ================= DATABASE ================= */
-
-connectDB();
 
 /* ================= HEALTH CHECK ================= */
 
@@ -76,10 +84,11 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/logs", logRoutes);
 
 // 🔐 Protected routes
-app.use("/api/alerts", orgIsolation, alertRoutes);
-app.use("/api/dashboard", orgIsolation, dashboardRoutes);
-app.use("/api/assets", orgIsolation, assetRoutes);
-app.use("/api/admin/api-keys", orgIsolation, apikeyRoutes);
+app.use("/api/alerts", authenticate, orgIsolation, alertRoutes);
+app.use("/api/dashboard", authenticate, orgIsolation, dashboardRoutes);
+app.use("/api/assets", authenticate, orgIsolation, assetRoutes);
+app.use("/api/admin/api-keys", authenticate, orgIsolation, apikeyRoutes);
+app.use("/api/users", authenticate, orgIsolation, userRoutes);
 
 /* ================= 404 HANDLER ================= */
 
@@ -111,7 +120,15 @@ app.use((err, req, res, next) => {
 initSocket(server);
 
 /* ================= SERVER START ================= */
+const startServer = async () => {
+  await connectDB();
 
-server.listen(config.port, () => {
-  console.log(`🚀 ThreatLens API running on port ${config.port}`);
+  server.listen(config.port, () => {
+    console.log(`🚀 ThreatLens API running on port ${config.port}`);
+  });
+};
+
+startServer().catch((error) => {
+  console.error("Failed to start server:", error.message);
+  process.exit(1);
 });
