@@ -91,6 +91,29 @@
   margin-right: auto;
 }
 
+.landing-about {
+  max-width: 760px;
+  margin: 0 auto 35px auto;
+  padding: 22px 24px;
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(13, 27, 42, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.landing-about h2 {
+  color: #00d4ff;
+  margin-bottom: 10px;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.landing-about p {
+  color: #c9def2;
+  line-height: 1.75;
+  font-size: 1rem;
+}
+
 /* ================= CTA BUTTONS ================= */
 
 .landing-cta {
@@ -202,6 +225,14 @@
     font-size: 1rem;
   }
 
+  .landing-about {
+    padding: 18px;
+  }
+
+  .landing-about h2 {
+    font-size: 1.3rem;
+  }
+
   .landing-cta {
     flex-direction: column;
     gap: 15px;
@@ -231,6 +262,10 @@
 
   .feature-card {
     padding: 20px;
+  }
+
+  .landing-about {
+    padding: 16px;
   }
 
   .feature-icon {

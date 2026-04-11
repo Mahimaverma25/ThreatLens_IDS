@@ -4,6 +4,20 @@ const Log = require("../models/Log");
 const config = require("../config/env");
 const { createAlert, updateAlert } = require("../services/alert.service");
 
+const severityToConfidence = {
+	Critical: 0.95,
+	High: 0.84,
+	Medium: 0.66,
+	Low: 0.44
+};
+
+const severityToRiskScore = {
+	Critical: 94,
+	High: 78,
+	Medium: 59,
+	Low: 36
+};
+
 const listAlerts = async (req, res) => {
 	try {
 		const limit = Math.min(Number.parseInt(req.query.limit || "50", 10), 200);
@@ -122,6 +136,8 @@ const scanAndStore = async (req, res) => {
 				type: alert.type,
 				ip: alert.ip,
 				severity: alert.severity || "Medium",
+				confidence: alert.confidence ?? severityToConfidence[alert.severity || "Medium"] ?? 0.5,
+				risk_score: alert.risk_score ?? severityToRiskScore[alert.severity || "Medium"] ?? 50,
 				relatedLogs: [log._id],
 				source: "ids-engine"
 			});

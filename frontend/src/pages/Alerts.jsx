@@ -9,24 +9,19 @@ const Alerts = () => {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
-
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-
   const [filters, setFilters] = useState({
     status: "",
     severity: "",
-    search: "",
+    search: ""
   });
 
   const limit = 20;
   const token = localStorage.getItem("accessToken");
-
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
-
-  /* ================= FETCH ALERTS ================= */
 
   const fetchAlerts = useCallback(async () => {
     try {
@@ -40,7 +35,6 @@ const Alerts = () => {
       abortRef.current = new AbortController();
 
       const res = await alerts.list(limit, page, filters);
-
       const data = res?.data?.data ?? [];
       const pagination = res?.data?.pagination ?? {};
 
@@ -50,7 +44,6 @@ const Alerts = () => {
       setTotal(pagination.total ?? data.length);
     } catch (err) {
       console.error("Alerts fetch error:", err);
-
       if (isMountedRef.current) {
         setError("Failed to fetch alerts");
       }
@@ -61,8 +54,6 @@ const Alerts = () => {
     }
   }, [page, filters]);
 
-  /* ================= SOCKET ================= */
-
   const socketHandlers = useMemo(
     () => ({
       "alerts:new": () => {
@@ -72,14 +63,12 @@ const Alerts = () => {
       "alerts:update": () => {
         clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = setTimeout(fetchAlerts, 300);
-      },
+      }
     }),
     [fetchAlerts]
   );
 
   useSocket(token, socketHandlers);
-
-  /* ================= INIT LOAD ================= */
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -88,23 +77,17 @@ const Alerts = () => {
     return () => {
       isMountedRef.current = false;
       clearTimeout(refreshTimerRef.current);
-
       if (abortRef.current) {
         abortRef.current.abort();
       }
     };
   }, [fetchAlerts]);
 
-  /* ================= SCAN ================= */
-
   const handleScan = async () => {
     try {
       setScanning(true);
       setError("");
-
       await alerts.scan();
-
-      // refresh after scan
       fetchAlerts();
     } catch (err) {
       console.error("Scan error:", err);
@@ -113,8 +96,6 @@ const Alerts = () => {
       setScanning(false);
     }
   };
-
-  /* ================= SEVERITY COLOR ================= */
 
   const getSeverityColor = (severity) => {
     switch (severity?.toUpperCase()) {
@@ -131,7 +112,28 @@ const Alerts = () => {
     }
   };
 
-  /* ================= LOADING ================= */
+  const alertSummary = useMemo(() => {
+    const totals = alertList.reduce(
+      (accumulator, alert) => {
+        accumulator.confidence += Number(alert.confidence || 0);
+        accumulator.risk += Number(alert.risk_score || 0);
+
+        if (alert.severity === "Critical") accumulator.critical += 1;
+        if (alert.severity === "High") accumulator.high += 1;
+        if (alert.status === "Investigating") accumulator.investigating += 1;
+        return accumulator;
+      },
+      { confidence: 0, risk: 0, critical: 0, high: 0, investigating: 0 }
+    );
+
+    return {
+      avgConfidence: alertList.length ? Math.round((totals.confidence / alertList.length) * 100) : 0,
+      avgRisk: alertList.length ? Math.round(totals.risk / alertList.length) : 0,
+      critical: totals.critical,
+      high: totals.high,
+      investigating: totals.investigating
+    };
+  }, [alertList]);
 
   if (loading) {
     return (
@@ -143,24 +145,50 @@ const Alerts = () => {
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
-  /* ================= UI ================= */
-
   return (
     <MainLayout>
-      <h1>Security Alerts</h1>
-      <p>All detected intrusions and suspicious activities are listed here.</p>
+      <section className="command-header">
+        <div>
+          <div className="command-eyebrow">ThreatLens / Detection / Incidents</div>
+          <h1>Security Alerts</h1>
+          <p>
+            Ranked intrusion alerts with severity, confidence, risk score, and analyst status.
+          </p>
+        </div>
+      </section>
 
       {error && <div className="error-message">{error}</div>}
 
-      {/* ================= CONTROLS ================= */}
+      <section className="metrics-grid">
+        <div className="metric-card">
+          <span>Visible Alerts</span>
+          <strong>{alertList.length}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Critical</span>
+          <strong>{alertSummary.critical}</strong>
+        </div>
+        <div className="metric-card">
+          <span>High Severity</span>
+          <strong>{alertSummary.high}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Investigating</span>
+          <strong>{alertSummary.investigating}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Avg Confidence</span>
+          <strong>{alertSummary.avgConfidence}%</strong>
+        </div>
+        <div className="metric-card">
+          <span>Avg Risk Score</span>
+          <strong>{alertSummary.avgRisk}</strong>
+        </div>
+      </section>
 
       <div className="controls">
-        <button
-          onClick={handleScan}
-          disabled={scanning}
-          className="scan-btn"
-        >
-          {scanning ? "🔄 Scanning..." : "🚀 Run Scan"}
+        <button onClick={handleScan} disabled={scanning} className="scan-btn">
+          {scanning ? "Scanning..." : "Run Scan"}
         </button>
 
         <input
@@ -169,10 +197,7 @@ const Alerts = () => {
           value={filters.search}
           onChange={(e) => {
             setPage(1);
-            setFilters((prev) => ({
-              ...prev,
-              search: e.target.value,
-            }));
+            setFilters((prev) => ({ ...prev, search: e.target.value }));
           }}
         />
 
@@ -180,10 +205,7 @@ const Alerts = () => {
           value={filters.severity}
           onChange={(e) => {
             setPage(1);
-            setFilters((prev) => ({
-              ...prev,
-              severity: e.target.value,
-            }));
+            setFilters((prev) => ({ ...prev, severity: e.target.value }));
           }}
         >
           <option value="">All severities</option>
@@ -197,10 +219,7 @@ const Alerts = () => {
           value={filters.status}
           onChange={(e) => {
             setPage(1);
-            setFilters((prev) => ({
-              ...prev,
-              status: e.target.value,
-            }));
+            setFilters((prev) => ({ ...prev, status: e.target.value }));
           }}
         >
           <option value="">All statuses</option>
@@ -212,8 +231,6 @@ const Alerts = () => {
         </select>
       </div>
 
-      {/* ================= ALERT TABLE ================= */}
-
       <div className="card alert-card">
         {alertList?.length > 0 ? (
           <>
@@ -223,6 +240,8 @@ const Alerts = () => {
                   <th>Type</th>
                   <th>IP Address</th>
                   <th>Severity</th>
+                  <th>Confidence</th>
+                  <th>Risk</th>
                   <th>Status</th>
                   <th>Timestamp</th>
                 </tr>
@@ -232,46 +251,33 @@ const Alerts = () => {
                 {alertList.map((alert) => (
                   <tr key={alert._id}>
                     <td>
-                      <Link
-                        to={`/alerts/${alert._id}`}
-                        className="alert-link"
-                      >
+                      <Link to={`/alerts/${alert._id}`} className="alert-link">
                         {alert.type}
                       </Link>
                     </td>
-
                     <td className="ip-cell">{alert.ip}</td>
-
                     <td>
-                      <span
-                        className={`severity ${getSeverityColor(
-                          alert.severity
-                        )}`}
-                      >
+                      <span className={`severity ${getSeverityColor(alert.severity)}`}>
                         {alert.severity}
                       </span>
                     </td>
-
+                    <td>{Math.round((alert.confidence || 0) * 100)}%</td>
+                    <td>{alert.risk_score ?? 50}</td>
                     <td>{alert.status}</td>
-
                     <td>
-                      {alert.timestamp
-                        ? new Date(alert.timestamp).toLocaleString()
-                        : "-"}
+                      {alert.timestamp ? new Date(alert.timestamp).toLocaleString() : "-"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
-            {/* ================= PAGINATION ================= */}
-
             <div className="pagination">
               <button
                 onClick={() => setPage((p) => Math.max(p - 1, 1))}
                 disabled={page === 1}
               >
-                ← Previous
+                Previous
               </button>
 
               <span>
@@ -279,19 +285,15 @@ const Alerts = () => {
               </span>
 
               <button
-                onClick={() =>
-                  setPage((p) => Math.min(p + 1, totalPages))
-                }
+                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
                 disabled={page >= totalPages}
               >
-                Next →
+                Next
               </button>
             </div>
           </>
         ) : (
-          <p>
-            No alerts detected yet. Run a scan to check for threats.
-          </p>
+          <p>No alerts detected yet. Run a scan to check for threats.</p>
         )}
       </div>
     </MainLayout>

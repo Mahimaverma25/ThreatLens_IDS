@@ -36,6 +36,16 @@ const Landing = () => {
             </p>
           </div>
 
+          <div className="landing-about">
+            <h2>What is ThreatLens?</h2>
+            <p>
+              ThreatLens is a cybersecurity monitoring platform that centralizes traffic logs,
+              flags suspicious behavior, and helps security teams investigate incidents faster.
+              It combines log ingestion, anomaly signals, rule-based detection, and live dashboards
+              so organizations can move from raw events to clear threat visibility.
+            </p>
+          </div>
+
           <div className="landing-cta">
             {user ? (
               <Link to="/dashboard" className="cta-button primary">
@@ -77,6 +87,30 @@ const Landing = () => {
               <div className="feature-icon">🔐</div>
               <h3>Enterprise Security</h3>
               <p>Enterprise-grade security for your organization</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon">🧠</div>
+              <h3>Hybrid Intelligence</h3>
+              <p>Combine rule-based checks with anomaly insights from your IDS pipeline</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon">📥</div>
+              <h3>Flexible Ingestion</h3>
+              <p>Collect logs from agents, uploads, and simulated traffic in one place</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon">👥</div>
+              <h3>Role-Based Access</h3>
+              <p>Separate admin, analyst, and user access with protected routes and APIs</p>
+            </div>
+
+            <div className="feature-card">
+              <div className="feature-icon">📣</div>
+              <h3>Live Alert Workflow</h3>
+              <p>Receive socket-driven updates and track alert activity as incidents evolve</p>
             </div>
           </div>
         </div>

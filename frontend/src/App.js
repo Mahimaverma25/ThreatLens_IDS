@@ -20,6 +20,10 @@ import AlertDetails from "./pages/AlertDetails";
 
 import "./App.css";
 
+const pageBackgroundStyle = {
+  "--app-page-background-image": `url(${process.env.PUBLIC_URL}/cropped.jpeg)`,
+};
+
 /* ================= ROLE-BASED WRAPPER ================= */
 
 const RoleRoute = ({ children, allowedRoles }) => {
@@ -44,9 +48,11 @@ const HomeRoute = () => {
   }
 
   return (
-    <RoleRoute allowedRoles={["admin"]}>
-      <Dashboard />
-    </RoleRoute>
+    <div className="app-page-background" style={pageBackgroundStyle}>
+      <RoleRoute allowedRoles={["admin"]}>
+        <Dashboard />
+      </RoleRoute>
+    </div>
   );
 };
 
@@ -60,29 +66,47 @@ function App() {
           <Route path="/" element={<HomeRoute />} />
 
           {/* ================= PUBLIC ROUTES ================= */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route
+            path="/login"
+            element={
+              <div className="app-page-background" style={pageBackgroundStyle}>
+                <Login />
+              </div>
+            }
+          />
+          <Route
+            path="/register"
+            element={
+              <div className="app-page-background" style={pageBackgroundStyle}>
+                <Register />
+              </div>
+            }
+          />
 
           {/* ================= ALERTS ================= */}
           <Route
             path="/alerts"
             element={
-              <ProtectedRoute>
-                <RoleRoute allowedRoles={["admin", "analyst"]}>
-                  <Alerts />
-                </RoleRoute>
-              </ProtectedRoute>
+              <div className="app-page-background" style={pageBackgroundStyle}>
+                <ProtectedRoute>
+                  <RoleRoute allowedRoles={["admin", "analyst"]}>
+                    <Alerts />
+                  </RoleRoute>
+                </ProtectedRoute>
+              </div>
             }
           />
 
           <Route
             path="/alerts/:id"
             element={
-              <ProtectedRoute>
-                <RoleRoute allowedRoles={["admin", "analyst"]}>
-                  <AlertDetails />
-                </RoleRoute>
-              </ProtectedRoute>
+              <div className="app-page-background" style={pageBackgroundStyle}>
+                <ProtectedRoute>
+                  <RoleRoute allowedRoles={["admin", "analyst"]}>
+                    <AlertDetails />
+                  </RoleRoute>
+                </ProtectedRoute>
+              </div>
             }
           />
 
@@ -90,11 +114,13 @@ function App() {
           <Route
             path="/logs"
             element={
-              <ProtectedRoute>
-                <RoleRoute allowedRoles={["admin", "analyst", "user"]}>
-                  <Logs />
-                </RoleRoute>
-              </ProtectedRoute>
+              <div className="app-page-background" style={pageBackgroundStyle}>
+                <ProtectedRoute>
+                  <RoleRoute allowedRoles={["admin", "analyst", "user"]}>
+                    <Logs />
+                  </RoleRoute>
+                </ProtectedRoute>
+              </div>
             }
           />
 

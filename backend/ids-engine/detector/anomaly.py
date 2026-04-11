@@ -55,6 +55,11 @@ def detect_anomaly(traffic: Dict) -> List[Dict]:
 				"type": "Anomalous Traffic",
 				"ip": traffic.get("ip", "unknown"),
 				"severity": "High",
+				"protocol": traffic.get("protocol", "TCP"),
+				"destination_port": traffic.get("port", 0),
+				"request_rate": traffic.get("request_rate", 0),
+				"confidence": 0.79,
+				"risk_score": 74
 			}
 		]
 

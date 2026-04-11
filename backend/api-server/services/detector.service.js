@@ -6,6 +6,20 @@ const { createAlert, updateAlert } = require("./alert.service");
 const windowStart = () =>
   new Date(Date.now() - config.alertCorrelationWindowMins * 60 * 1000);
 
+const severityToConfidence = {
+  Critical: 0.95,
+  High: 0.82,
+  Medium: 0.64,
+  Low: 0.42
+};
+
+const severityToRiskScore = {
+  Critical: 92,
+  High: 76,
+  Medium: 58,
+  Low: 34
+};
+
 const appendRelatedLog = async (alert, logId) => {
   if (!alert.relatedLogs.some((id) => id.toString() === logId.toString())) {
     alert.relatedLogs.push(logId);
@@ -20,7 +34,9 @@ const upsertAlert = async ({
   ip,
   severity,
   type,
-  relatedLogs
+  relatedLogs,
+  confidence,
+  risk_score
 }) => {
   const existing = await Alert.findOne({
     _org_id: orgId,
@@ -43,6 +59,8 @@ const upsertAlert = async ({
     attackType,
     ip,
     severity,
+    confidence,
+    risk_score,
     relatedLogs,
     source: "ids-engine"
   });
@@ -67,6 +85,8 @@ const evaluateBruteForce = async (log) => {
       type: "Brute Force Login Attempts",
       ip: log.ip || "unknown",
       severity: "High",
+      confidence: severityToConfidence.High,
+      risk_score: severityToRiskScore.High,
       relatedLogs: [log._id]
     });
   }
@@ -90,6 +110,8 @@ const evaluateUnauthorizedAdminAccess = async (log) => {
     type: "Unauthorized Admin Access",
     ip: log.ip || "unknown",
     severity: "Critical",
+    confidence: severityToConfidence.Critical,
+    risk_score: severityToRiskScore.Critical,
     relatedLogs: [log._id]
   });
 };
@@ -113,6 +135,8 @@ const evaluateDosBurst = async (log) => {
       type: "Request Burst / DoS",
       ip: log.ip || "unknown",
       severity: "Critical",
+      confidence: severityToConfidence.Critical,
+      risk_score: severityToRiskScore.Critical,
       relatedLogs: [log._id]
     });
   }
@@ -138,6 +162,8 @@ const evaluateSuspiciousIp = async (log) => {
       type: "Suspicious IP Activity",
       ip: log.ip || "unknown",
       severity: "Medium",
+      confidence: severityToConfidence.Medium,
+      risk_score: severityToRiskScore.Medium,
       relatedLogs: [log._id]
     });
   }

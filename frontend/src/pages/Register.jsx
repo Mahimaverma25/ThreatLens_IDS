@@ -30,8 +30,12 @@ const Register = () => {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h1>🛡️ ThreatLens</h1>
-        <h2>Register</h2>
+        <div className="auth-badge">ThreatLens Access Setup</div>
+        <h1>ThreatLens</h1>
+        <h2>Create Account</h2>
+        <p className="auth-description">
+          Set up analyst access to the platform and start monitoring logs, alerts, and incident signals.
+        </p>
 
         {error && <div className="error-message">{error}</div>}
 
@@ -44,6 +48,7 @@ const Register = () => {
               onChange={(e) => setUsername(e.target.value)}
               required
               disabled={loading}
+              placeholder="Choose a username"
             />
           </div>
 
@@ -55,6 +60,7 @@ const Register = () => {
               onChange={(e) => setEmail(e.target.value)}
               required
               disabled={loading}
+              placeholder="you@organization.com"
             />
           </div>
 
@@ -66,16 +72,17 @@ const Register = () => {
               onChange={(e) => setPassword(e.target.value)}
               required
               disabled={loading}
+              placeholder="Create a strong password"
             />
           </div>
 
           <button type="submit" disabled={loading}>
-            {loading ? "Registering..." : "Register"}
+            {loading ? "Creating account..." : "Register Securely"}
           </button>
         </form>
 
         <p className="auth-link">
-          Already have an account? <Link to="/login">Login here</Link>
+          Already have an account? <Link to="/login">Sign in here</Link>
         </p>
       </div>
     </div>

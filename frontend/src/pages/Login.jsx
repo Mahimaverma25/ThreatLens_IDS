@@ -19,26 +19,19 @@ const Login = () => {
 
     try {
       const res = await login(email, password);
-
       const user = res?.user;
 
       if (!user) {
         throw new Error("Invalid server response");
       }
 
-      // update UI context handled inside AuthContext
-      console.log("LOGIN SUCCESS:", user);
-
-      // role-based redirect
       if (user.role === "admin") {
         navigate("/");
       } else {
         navigate("/logs");
       }
-
     } catch (err) {
       console.error("Login error:", err);
-
       setError(
         err?.response?.data?.message ||
         err?.message ||
@@ -52,16 +45,18 @@ const Login = () => {
   return (
     <div className="auth-container">
       <div className="auth-card">
-
-        <h1>🛡️ ThreatLens</h1>
-        <h2>Login</h2>
+        <div className="auth-badge">ThreatLens Security Console</div>
+        <h1>ThreatLens</h1>
+        <h2>Secure Sign In</h2>
+        <p className="auth-description">
+          Access your monitoring workspace, review live telemetry, and respond to active threats.
+        </p>
 
         {error && <div className="error-message">{error}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Email</label>
-
             <input
               type="email"
               value={email}
@@ -69,12 +64,12 @@ const Login = () => {
               required
               disabled={loading}
               autoComplete="email"
+              placeholder="analyst@threatlens.com"
             />
           </div>
 
           <div className="form-group">
             <label>Password</label>
-
             <input
               type="password"
               value={password}
@@ -82,19 +77,18 @@ const Login = () => {
               required
               disabled={loading}
               autoComplete="current-password"
+              placeholder="Enter your password"
             />
           </div>
 
           <button type="submit" disabled={loading}>
-            {loading ? "🔐 Logging in..." : "Login"}
+            {loading ? "Signing in..." : "Enter Dashboard"}
           </button>
         </form>
 
         <p className="auth-link">
-          Don't have an account?{" "}
-          <Link to="/register">Register here</Link>
+          Don&apos;t have an account? <Link to="/register">Create one now</Link>
         </p>
-
       </div>
     </div>
   );
