@@ -17,6 +17,14 @@ import Dashboard from "./pages/Dashboard";
 import Alerts from "./pages/Alerts";
 import Logs from "./pages/Logs";
 import AlertDetails from "./pages/AlertDetails";
+import Incidents from "./pages/Incidents";
+import Assets from "./pages/Assets";
+import Rules from "./pages/Rules";
+import ThreatIntel from "./pages/ThreatIntel";
+import Reports from "./pages/Reports";
+import AccessManagement from "./pages/AccessManagement";
+import ModelHealth from "./pages/ModelHealth";
+import ResponsePlaybooks from "./pages/ResponsePlaybooks";
 
 import "./App.css";
 
@@ -47,14 +55,18 @@ const HomeRoute = () => {
     return <Landing />;
   }
 
-  return (
-    <div className="app-page-background" style={pageBackgroundStyle}>
-      <RoleRoute allowedRoles={["admin"]}>
-        <Dashboard />
-      </RoleRoute>
-    </div>
-  );
+  return <Navigate to="/dashboard" replace />;
 };
+
+const AppPage = ({ children, allowedRoles = ["admin", "analyst", "user"] }) => (
+  <div className="app-page-background" style={pageBackgroundStyle}>
+    <ProtectedRoute>
+      <RoleRoute allowedRoles={allowedRoles}>
+        {children}
+      </RoleRoute>
+    </ProtectedRoute>
+  </div>
+);
 
 function App() {
   return (
@@ -64,6 +76,15 @@ function App() {
 
           {/* ================= HOME ================= */}
           <Route path="/" element={<HomeRoute />} />
+
+          <Route
+            path="/dashboard"
+            element={
+              <AppPage>
+                <Dashboard />
+              </AppPage>
+            }
+          />
 
           {/* ================= PUBLIC ROUTES ================= */}
           <Route
@@ -87,40 +108,99 @@ function App() {
           <Route
             path="/alerts"
             element={
-              <div className="app-page-background" style={pageBackgroundStyle}>
-                <ProtectedRoute>
-                  <RoleRoute allowedRoles={["admin", "analyst"]}>
-                    <Alerts />
-                  </RoleRoute>
-                </ProtectedRoute>
-              </div>
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <Alerts />
+              </AppPage>
             }
           />
 
           <Route
             path="/alerts/:id"
             element={
-              <div className="app-page-background" style={pageBackgroundStyle}>
-                <ProtectedRoute>
-                  <RoleRoute allowedRoles={["admin", "analyst"]}>
-                    <AlertDetails />
-                  </RoleRoute>
-                </ProtectedRoute>
-              </div>
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <AlertDetails />
+              </AppPage>
             }
           />
 
-          {/* ================= LOGS ================= */}
           <Route
             path="/logs"
             element={
-              <div className="app-page-background" style={pageBackgroundStyle}>
-                <ProtectedRoute>
-                  <RoleRoute allowedRoles={["admin", "analyst", "user"]}>
-                    <Logs />
-                  </RoleRoute>
-                </ProtectedRoute>
-              </div>
+              <AppPage>
+                <Logs />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/incidents"
+            element={
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <Incidents />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/assets"
+            element={
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <Assets />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/rules"
+            element={
+              <AppPage allowedRoles={["admin"]}>
+                <Rules />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/threat-intel"
+            element={
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <ThreatIntel />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/reports"
+            element={
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <Reports />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/access"
+            element={
+              <AppPage allowedRoles={["admin"]}>
+                <AccessManagement />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/model-health"
+            element={
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <ModelHealth />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/playbooks"
+            element={
+              <AppPage allowedRoles={["admin", "analyst"]}>
+                <ResponsePlaybooks />
+              </AppPage>
             }
           />
 

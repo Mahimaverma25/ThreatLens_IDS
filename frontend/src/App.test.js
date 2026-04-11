@@ -7,5 +7,5 @@ test("renders login form for unauthenticated users", () => {
 
   render(<App />);
 
-  expect(screen.getByRole("heading", { name: /login/i })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: /secure sign in/i })).toBeInTheDocument();
 });

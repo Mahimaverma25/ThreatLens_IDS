@@ -206,4 +206,24 @@ export const dashboard = {
   health: () => api.get("/dashboard/health"),
 };
 
+export const assets = {
+  list: () => api.get("/assets"),
+  get: (id) => api.get(`/assets/${id}`),
+  create: (payload) => api.post("/assets", payload),
+  update: (id, payload) => api.patch(`/assets/${id}`, payload),
+  remove: (id) => api.delete(`/assets/${id}`)
+};
+
+export const users = {
+  list: () => api.get("/users"),
+  me: () => api.get("/users/me")
+};
+
+export const apiKeys = {
+  list: () => api.get("/admin/api-keys"),
+  create: (payload) => api.post("/admin/api-keys", payload),
+  revoke: (id) => api.delete(`/admin/api-keys/${id}`),
+  rotate: (id, payload = {}) => api.post(`/admin/api-keys/${id}/rotate`, payload)
+};
+
 export default api;

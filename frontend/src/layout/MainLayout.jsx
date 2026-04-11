@@ -1,5 +1,5 @@
-import Navbar from "../components/Navbar.jsx";
-import Sidebar from "../components/Sidebar.jsx";
+import Navbar from "../components/AppNavbar.jsx";
+import Sidebar from "../components/AppSidebar.jsx";
 import "../styles/layout.css";
 
 function MainLayout({ children }) {
