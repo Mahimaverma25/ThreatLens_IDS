@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const config = require("../config/env");
+const { normalizeRole } = require("../utils/roles");
 
 const authenticate = (req, res, next) => {
   try {
@@ -32,6 +33,7 @@ const authenticate = (req, res, next) => {
 
       req.user = {
         ...decoded,
+        role: normalizeRole(decoded.role),
         sub: userId,
         _id: userId,
       };

@@ -2,8 +2,37 @@ import axios from "axios";
 
 /* ================= BASE API ================= */
 
+const trimTrailingSlashes = (value) => value.replace(/\/+$/, "");
+
+const resolveApiBaseUrl = () => {
+  const configuredBaseUrl = (process.env.REACT_APP_API_URL || "").trim();
+
+  if (!configuredBaseUrl) {
+    return "/api";
+  }
+
+  if (typeof window === "undefined") {
+    return trimTrailingSlashes(configuredBaseUrl);
+  }
+
+  try {
+    const resolvedUrl = new URL(configuredBaseUrl, window.location.origin);
+    const appHostname = window.location.hostname;
+    const localhostHosts = new Set(["localhost", "127.0.0.1"]);
+
+    // Avoid shipping a localhost API target into non-local environments.
+    if (localhostHosts.has(resolvedUrl.hostname) && !localhostHosts.has(appHostname)) {
+      return "/api";
+    }
+
+    return trimTrailingSlashes(resolvedUrl.toString());
+  } catch {
+    return trimTrailingSlashes(configuredBaseUrl);
+  }
+};
+
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || "/api",
+  baseURL: resolveApiBaseUrl(),
   timeout: 10000,
   withCredentials: true,
 });
@@ -204,6 +233,19 @@ export const logs = {
 export const dashboard = {
   stats: () => api.get("/dashboard/stats"),
   health: () => api.get("/dashboard/health"),
+};
+
+export const reports = {
+  summary: () => api.get("/reports"),
+  exportAlertsCsv: (severity = "") =>
+    api.get("/reports/export/alerts.csv", {
+      params: severity ? { severity } : {},
+      responseType: "blob",
+    }),
+  exportLogsCsv: () =>
+    api.get("/reports/export/logs.csv", {
+      responseType: "blob",
+    }),
 };
 
 export const assets = {

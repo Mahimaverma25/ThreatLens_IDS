@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { ROLE_ADMIN, ROLE_VIEWER, normalizeRole } = require("../utils/roles");
 
 const UserSchema = new mongoose.Schema({
   _org_id: {
@@ -31,8 +32,8 @@ const UserSchema = new mongoose.Schema({
 
   role: {
     type: String,
-    enum: ["admin", "analyst", "user"],
-    default: "user",
+    enum: [ROLE_ADMIN, ROLE_VIEWER],
+    default: ROLE_VIEWER,
     trim: true
   },
 
@@ -45,6 +46,12 @@ const UserSchema = new mongoose.Schema({
     immutable: true
   }
 });
+
+// Enforce the single-admin policy at the database level.
+UserSchema.index(
+  { role: 1 },
+  { unique: true, partialFilterExpression: { role: ROLE_ADMIN } }
+);
 
 /* 🔐 Clean JSON response */
 UserSchema.set("toJSON", {
@@ -60,6 +67,9 @@ UserSchema.pre("save", function (next) {
   if (this.email) {
     this.email = this.email.toLowerCase();
   }
+
+  this.role = normalizeRole(this.role);
+
   next();
 });
 

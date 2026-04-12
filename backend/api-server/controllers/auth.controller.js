@@ -11,6 +11,18 @@ const {
   hashToken,
   getRefreshTokenExpiry,
 } = require("../utils/tokens");
+const { normalizeRole, ROLE_VIEWER } = require("../utils/roles");
+
+const ensureStoredRole = async (user) => {
+  const normalizedRole = normalizeRole(user.role);
+
+  if (user.role !== normalizedRole) {
+    user.role = normalizedRole;
+    await user.save();
+  }
+
+  return user;
+};
 
 /* ================= COOKIE HELPERS ================= */
 
@@ -96,7 +108,7 @@ const register = async (req, res) => {
       email,
       username,
       passwordHash,
-      role: "admin",
+      role: ROLE_VIEWER,
       _org_id: org._id,
     });
 
@@ -155,6 +167,8 @@ const login = async (req, res) => {
       return res.status(500).json({ message: "Password not set properly" });
     }
 
+    await ensureStoredRole(user);
+
     // ✅ Compare password
     const isMatch = await bcrypt.compare(password, user.passwordHash);
 
@@ -209,6 +223,8 @@ const me = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    await ensureStoredRole(user);
+
     return res.json({ user: user.toJSON() });
 
   } catch (error) {
@@ -252,6 +268,8 @@ const refresh = async (req, res) => {
       clearRefreshCookie(res);
       return res.status(401).json({ message: "Invalid user" });
     }
+
+    await ensureStoredRole(user);
 
     const newRefresh = generateRefreshToken();
     const newExpiry = getRefreshTokenExpiry();

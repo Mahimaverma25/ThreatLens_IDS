@@ -5,7 +5,7 @@ import { navigationSections } from "../config/navigation";
 const AppSidebar = () => {
   const location = useLocation();
   const { user } = useAuth();
-  const role = user?.role || "user";
+  const role = user?.role || "viewer";
 
   const isActive = (path) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`) ? "active" : "";

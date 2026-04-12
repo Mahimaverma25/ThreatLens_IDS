@@ -19,6 +19,7 @@ const alertRoutes = require("./routes/alerts.routes");
 const authRoutes = require("./routes/auth.routes");
 const logRoutes = require("./routes/log.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
+const reportRoutes = require("./routes/report.routes");
 const apikeyRoutes = require("./routes/apikey.routes");
 const assetRoutes = require("./routes/asset.routes");
 const userRoutes = require("./routes/user.routes");
@@ -86,6 +87,7 @@ app.use("/api/logs", logRoutes);
 // 🔐 Protected routes
 app.use("/api/alerts", authenticate, orgIsolation, alertRoutes);
 app.use("/api/dashboard", authenticate, orgIsolation, dashboardRoutes);
+app.use("/api/reports", authenticate, orgIsolation, reportRoutes);
 app.use("/api/assets", authenticate, orgIsolation, assetRoutes);
 app.use("/api/admin/api-keys", authenticate, orgIsolation, apikeyRoutes);
 app.use("/api/users", authenticate, orgIsolation, userRoutes);

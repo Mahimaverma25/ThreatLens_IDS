@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const authenticate = require("../middleware/auth.middleware");
-const authorize = require("../middleware/authorize.middleware");
+const { authorizeAdmin, authorizeViewer } = require("../middleware/authorize.middleware");
 const asyncHandler = require("../utils/asyncHandler");
 const {
   createAsset,
@@ -16,24 +16,24 @@ const {
 router.use(authenticate);
 
 // List assets
-router.get("/", asyncHandler(listAssets));
+router.get("/", authorizeViewer, asyncHandler(listAssets));
 
 // Get asset details
-router.get("/:id", asyncHandler(getAsset));
+router.get("/:id", authorizeViewer, asyncHandler(getAsset));
 
 // Create asset (admin only)
-router.post("/", authorize(["admin"]), asyncHandler(createAsset));
+router.post("/", authorizeAdmin, asyncHandler(createAsset));
 
 // Update asset (admin only)
-router.patch("/:id", authorize(["admin"]), asyncHandler(updateAsset));
+router.patch("/:id", authorizeAdmin, asyncHandler(updateAsset));
 
 // Delete asset (admin only)
-router.delete("/:id", authorize(["admin"]), asyncHandler(deleteAsset));
+router.delete("/:id", authorizeAdmin, asyncHandler(deleteAsset));
 
 // Add suppression rule (admin only)
-router.post("/:id/suppression-rules", authorize(["admin"]), asyncHandler(addSuppressionRule));
+router.post("/:id/suppression-rules", authorizeAdmin, asyncHandler(addSuppressionRule));
 
 // Remove suppression rule (admin only)
-router.delete("/:id/suppression-rules/:rule_id", authorize(["admin"]), asyncHandler(removeSuppressionRule));
+router.delete("/:id/suppression-rules/:rule_id", authorizeAdmin, asyncHandler(removeSuppressionRule));
 
 module.exports = router;

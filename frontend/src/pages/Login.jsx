@@ -64,7 +64,7 @@ const Login = () => {
               required
               disabled={loading}
               autoComplete="email"
-              placeholder="analyst@threatlens.com"
+                placeholder="viewer@threatlens.com"
             />
           </div>
 

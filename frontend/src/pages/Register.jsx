@@ -34,7 +34,7 @@ const Register = () => {
         <h1>ThreatLens</h1>
         <h2>Create Account</h2>
         <p className="auth-description">
-          Set up analyst access to the platform and start monitoring logs, alerts, and incident signals.
+            Create a viewer account to monitor dashboards, alerts, logs, and reports with read-only access.
         </p>
 
         {error && <div className="error-message">{error}</div>}

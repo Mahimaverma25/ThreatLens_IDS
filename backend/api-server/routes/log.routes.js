@@ -3,7 +3,7 @@ const multer = require("multer");
 const { validateAPIKey, validateIngestPayload } = require("../middleware/ingest.middleware");
 const authenticate = require("../middleware/auth.middleware");
 const { orgIsolation } = require("../middleware/orgIsolation.middleware");
-const authorize = require("../middleware/authorize.middleware");
+const { authorizeAdmin, authorizeViewer } = require("../middleware/authorize.middleware");
 const asyncHandler = require("../utils/asyncHandler");
 
 const {
@@ -41,17 +41,17 @@ router.post(
  */
 
 // Get logs
-router.get("/", authenticate, orgIsolation, asyncHandler(listLogs));
+router.get("/", authenticate, orgIsolation, authorizeViewer, asyncHandler(listLogs));
 
 // Create log manually
-router.post("/", authenticate, orgIsolation, asyncHandler(createLog));
+router.post("/", authenticate, orgIsolation, authorizeAdmin, asyncHandler(createLog));
 
 // Upload logs file
 router.post(
   "/upload",
   authenticate,
   orgIsolation,
-  authorize(["admin", "analyst"]),
+  authorizeAdmin,
   upload.single("file"),
   asyncHandler(uploadLogs)
 );
@@ -61,7 +61,7 @@ router.post(
   "/simulate",
   authenticate,
   orgIsolation,
-  authorize(["admin", "analyst"]),
+  authorizeAdmin,
   asyncHandler(simulateTraffic)
 );
 

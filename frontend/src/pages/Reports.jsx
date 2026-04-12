@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import MainLayout from "../layout/MainLayout";
-import { alerts, logs } from "../services/api";
+import { reports } from "../services/api";
+import { useAuth } from "../context/AuthContext";
 
-const downloadCsv = (filename, rows) => {
-  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+const downloadBlob = (filename, blob) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -15,20 +15,22 @@ const downloadCsv = (filename, rows) => {
 };
 
 const Reports = () => {
+  const { user } = useAuth();
   const [alertList, setAlertList] = useState([]);
   const [logList, setLogList] = useState([]);
   const [severity, setSeverity] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const isAdmin = user?.role === "admin";
 
   useEffect(() => {
     const fetchReports = async () => {
       try {
         setLoading(true);
         setError("");
-        const [alertResponse, logResponse] = await Promise.all([alerts.list(200, 1), logs.list(200, 1)]);
-        setAlertList(alertResponse?.data?.data ?? []);
-        setLogList(logResponse?.data?.data ?? []);
+        const response = await reports.summary();
+        setAlertList(response?.data?.data?.alerts ?? []);
+        setLogList(response?.data?.data?.logs ?? []);
       } catch (fetchError) {
         console.error("Reports fetch error:", fetchError);
         setError("Failed to load reporting data");
@@ -48,6 +50,26 @@ const Reports = () => {
     if (!severity) return logList;
     return logList.filter((log) => (severity === "Critical" ? Number(log.metadata?.requestRate || 0) > 150 : true));
   }, [logList, severity]);
+
+  const handleExportAlerts = async () => {
+    try {
+      const response = await reports.exportAlertsCsv(severity);
+      downloadBlob("threatlens-alerts.csv", response.data);
+    } catch (exportError) {
+      console.error("Alerts export error:", exportError);
+      setError("Failed to export alerts");
+    }
+  };
+
+  const handleExportLogs = async () => {
+    try {
+      const response = await reports.exportLogsCsv();
+      downloadBlob("threatlens-logs.csv", response.data);
+    } catch (exportError) {
+      console.error("Logs export error:", exportError);
+      setError("Failed to export logs");
+    }
+  };
 
   if (loading) {
     return (
@@ -90,6 +112,7 @@ const Reports = () => {
 
       <div className="card">
         <h3>Export Controls</h3>
+        {!isAdmin && <p>Viewer access is read-only. Report exports are restricted to the admin account.</p>}
         <div className="action-row">
           <select value={severity} onChange={(event) => setSeverity(event.target.value)}>
             <option value="">All severities</option>
@@ -101,50 +124,16 @@ const Reports = () => {
 
           <button
             className="scan-btn"
-            onClick={() =>
-              downloadCsv(
-                "threatlens-alerts.csv",
-                [
-                  "type,ip,severity,status,confidence,risk_score,timestamp",
-                  ...filteredAlerts.map((alert) =>
-                    [
-                      alert.type,
-                      alert.ip,
-                      alert.severity,
-                      alert.status,
-                      alert.confidence,
-                      alert.risk_score,
-                      alert.timestamp
-                    ].join(",")
-                  )
-                ]
-              )
-            }
+            disabled={!isAdmin}
+            onClick={handleExportAlerts}
           >
             Export Alerts CSV
           </button>
 
           <button
             className="scan-btn"
-            onClick={() =>
-              downloadCsv(
-                "threatlens-logs.csv",
-                [
-                  "message,ip,protocol,bytes,destination_port,request_rate,timestamp",
-                  ...filteredLogs.map((log) =>
-                    [
-                      `"${String(log.message || "").replace(/"/g, '""')}"`,
-                      log.ip,
-                      log.metadata?.protocol || "",
-                      log.metadata?.bytes || 0,
-                      log.metadata?.destinationPort || log.metadata?.port || "",
-                      log.metadata?.requestRate || 0,
-                      log.timestamp || ""
-                    ].join(",")
-                  )
-                ]
-              )
-            }
+            disabled={!isAdmin}
+            onClick={handleExportLogs}
           >
             Export Logs CSV
           </button>

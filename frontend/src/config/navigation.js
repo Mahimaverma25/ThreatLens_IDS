@@ -2,26 +2,26 @@ export const navigationSections = [
   {
     title: "Overview",
     items: [
-      { label: "Dashboard", path: "/dashboard", shortLabel: "DB", roles: ["admin", "analyst", "user"] },
-      { label: "Incidents", path: "/incidents", shortLabel: "IN", roles: ["admin", "analyst"] },
-      { label: "Alerts", path: "/alerts", shortLabel: "AL", roles: ["admin", "analyst"] },
-      { label: "Logs", path: "/logs", shortLabel: "LG", roles: ["admin", "analyst", "user"] }
+      { label: "Dashboard", path: "/dashboard", shortLabel: "DB", roles: ["admin", "viewer"] },
+      { label: "Alerts", path: "/alerts", shortLabel: "AL", roles: ["admin", "viewer"] },
+      { label: "Logs", path: "/logs", shortLabel: "LG", roles: ["admin", "viewer"] },
+      { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "viewer"] }
     ]
   },
   {
     title: "Detection",
     items: [
-      { label: "Assets", path: "/assets", shortLabel: "AS", roles: ["admin", "analyst"] },
+      { label: "Incidents", path: "/incidents", shortLabel: "IN", roles: ["admin"] },
+      { label: "Assets", path: "/assets", shortLabel: "AS", roles: ["admin"] },
       { label: "Rules", path: "/rules", shortLabel: "RL", roles: ["admin"] },
-      { label: "Threat Intel", path: "/threat-intel", shortLabel: "TI", roles: ["admin", "analyst"] },
-      { label: "Model Health", path: "/model-health", shortLabel: "MH", roles: ["admin", "analyst"] }
+      { label: "Threat Intel", path: "/threat-intel", shortLabel: "TI", roles: ["admin"] },
+      { label: "Model Health", path: "/model-health", shortLabel: "MH", roles: ["admin"] }
     ]
   },
   {
     title: "Operations",
     items: [
-      { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "analyst"] },
-      { label: "Response Playbooks", path: "/playbooks", shortLabel: "PB", roles: ["admin", "analyst"] },
+      { label: "Response Playbooks", path: "/playbooks", shortLabel: "PB", roles: ["admin"] },
       { label: "Users / API Keys", path: "/access", shortLabel: "UA", roles: ["admin"] }
     ]
   }

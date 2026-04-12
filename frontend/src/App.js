@@ -58,7 +58,7 @@ const HomeRoute = () => {
   return <Navigate to="/dashboard" replace />;
 };
 
-const AppPage = ({ children, allowedRoles = ["admin", "analyst", "user"] }) => (
+const AppPage = ({ children, allowedRoles = ["admin", "viewer"] }) => (
   <div className="app-page-background" style={pageBackgroundStyle}>
     <ProtectedRoute>
       <RoleRoute allowedRoles={allowedRoles}>
@@ -108,7 +108,7 @@ function App() {
           <Route
             path="/alerts"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin", "viewer"]}>
                 <Alerts />
               </AppPage>
             }
@@ -117,7 +117,7 @@ function App() {
           <Route
             path="/alerts/:id"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin", "viewer"]}>
                 <AlertDetails />
               </AppPage>
             }
@@ -135,7 +135,7 @@ function App() {
           <Route
             path="/incidents"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin"]}>
                 <Incidents />
               </AppPage>
             }
@@ -144,7 +144,7 @@ function App() {
           <Route
             path="/assets"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin"]}>
                 <Assets />
               </AppPage>
             }
@@ -162,7 +162,7 @@ function App() {
           <Route
             path="/threat-intel"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin"]}>
                 <ThreatIntel />
               </AppPage>
             }
@@ -171,7 +171,7 @@ function App() {
           <Route
             path="/reports"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin", "viewer"]}>
                 <Reports />
               </AppPage>
             }
@@ -189,7 +189,7 @@ function App() {
           <Route
             path="/model-health"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin"]}>
                 <ModelHealth />
               </AppPage>
             }
@@ -198,7 +198,7 @@ function App() {
           <Route
             path="/playbooks"
             element={
-              <AppPage allowedRoles={["admin", "analyst"]}>
+              <AppPage allowedRoles={["admin"]}>
                 <ResponsePlaybooks />
               </AppPage>
             }

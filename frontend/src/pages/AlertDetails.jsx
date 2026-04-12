@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import MainLayout from "../layout/MainLayout";
 import { alerts } from "../services/api";
 import useSocket from "../hooks/useSocket";
+import { useAuth } from "../context/AuthContext";
 
 const formatBytes = (value) => {
   const bytes = Number(value || 0);
@@ -14,6 +15,7 @@ const formatBytes = (value) => {
 
 const AlertDetails = () => {
   const { id } = useParams();
+  const { user } = useAuth();
 
   const [alert, setAlert] = useState(null);
   const [status, setStatus] = useState("");
@@ -23,6 +25,7 @@ const AlertDetails = () => {
   const [error, setError] = useState("");
 
   const token = localStorage.getItem("accessToken");
+  const isAdmin = user?.role === "admin";
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
 
@@ -210,26 +213,30 @@ const AlertDetails = () => {
       <div className="card">
         <h3>Analyst Actions</h3>
 
-        <div className="action-row">
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="New">New</option>
-            <option value="Acknowledged">Acknowledged</option>
-            <option value="Investigating">Investigating</option>
-            <option value="Resolved">Resolved</option>
-            <option value="False Positive">False Positive</option>
-          </select>
+        {isAdmin ? (
+          <div className="action-row">
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="New">New</option>
+              <option value="Acknowledged">Acknowledged</option>
+              <option value="Investigating">Investigating</option>
+              <option value="Resolved">Resolved</option>
+              <option value="False Positive">False Positive</option>
+            </select>
 
-          <input
-            className="note-input"
-            placeholder="Add analyst note"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
+            <input
+              className="note-input"
+              placeholder="Add analyst note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
 
-          <button className="scan-btn" onClick={handleUpdate} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </button>
-        </div>
+            <button className="scan-btn" onClick={handleUpdate} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        ) : (
+          <p>Viewer access is read-only. Alert status and notes can only be changed by the admin.</p>
+        )}
       </div>
 
       <div className="card">

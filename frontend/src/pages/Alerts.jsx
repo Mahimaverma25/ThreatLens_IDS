@@ -3,8 +3,10 @@ import { Link } from "react-router-dom";
 import MainLayout from "../layout/MainLayout";
 import { alerts } from "../services/api";
 import useSocket from "../hooks/useSocket";
+import { useAuth } from "../context/AuthContext";
 
 const Alerts = () => {
+  const { user } = useAuth();
   const [alertList, setAlertList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -18,6 +20,7 @@ const Alerts = () => {
   });
 
   const limit = 20;
+  const isAdmin = user?.role === "admin";
   const token = localStorage.getItem("accessToken");
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -187,9 +190,15 @@ const Alerts = () => {
       </section>
 
       <div className="controls">
-        <button onClick={handleScan} disabled={scanning} className="scan-btn">
-          {scanning ? "Scanning..." : "Run Scan"}
-        </button>
+        {isAdmin ? (
+          <button onClick={handleScan} disabled={scanning} className="scan-btn">
+            {scanning ? "Scanning..." : "Run Scan"}
+          </button>
+        ) : (
+          <button disabled className="scan-btn">
+            Read-only access
+          </button>
+        )}
 
         <input
           className="search-input"

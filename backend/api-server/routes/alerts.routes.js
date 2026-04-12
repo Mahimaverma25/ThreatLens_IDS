@@ -2,7 +2,7 @@ const router = require("express").Router();
 const { body } = require("express-validator");
 
 const authenticate = require("../middleware/auth.middleware");
-const authorize = require("../middleware/authorize.middleware");
+const { authorizeAdmin, authorizeViewer } = require("../middleware/authorize.middleware");
 const { validateRequest } = require("../middleware/validate.middleware");
 const asyncHandler = require("../utils/asyncHandler");
 
@@ -13,14 +13,14 @@ const {
   scanAndStore
 } = require("../controllers/alerts.controller");
 
-router.get("/", authenticate, asyncHandler(listAlerts));
+router.get("/", authenticate, authorizeViewer, asyncHandler(listAlerts));
 
-router.get("/:id", authenticate, asyncHandler(getAlertById));
+router.get("/:id", authenticate, authorizeViewer, asyncHandler(getAlertById));
 
 router.patch(
   "/:id",
   authenticate,
-  authorize(["admin", "analyst"]),
+  authorizeAdmin,
   [
     body("status")
       .optional()
@@ -36,7 +36,7 @@ router.patch(
 router.post(
   "/scan",
   authenticate,
-  authorize(["admin", "analyst"]),
+  authorizeAdmin,
   asyncHandler(scanAndStore)
 );
 

@@ -1,10 +1,11 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const config = require("../config/env");
+const { normalizeRole } = require("./roles");
 
 const generateAccessToken = (user) =>
   jwt.sign(
-    { sub: user.id, role: user.role, email: user.email },
+    { sub: user.id, role: normalizeRole(user.role), email: user.email },
     config.jwtSecret,
     { expiresIn: config.jwtExpiresIn }
   );

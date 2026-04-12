@@ -4,6 +4,7 @@ const initSocket = (httpServer) => {
   const { Server } = require("socket.io");
   const config = require("./config/env");
   const jwt = require("jsonwebtoken");
+  const { normalizeRole } = require("./utils/roles");
 
   ioInstance = new Server(httpServer, {
     cors: {
@@ -20,7 +21,7 @@ const initSocket = (httpServer) => {
 
     try {
       const payload = jwt.verify(token, config.jwtSecret);
-      socket.user = payload;
+      socket.user = { ...payload, role: normalizeRole(payload.role) };
       return next();
     } catch (error) {
       return next(new Error("Unauthorized"));

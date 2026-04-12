@@ -3,11 +3,22 @@ import { auth as authApi } from "../services/api";
 
 export const AuthContext = createContext();
 
+const normalizeUserRole = (user) => {
+  if (!user) {
+    return user;
+  }
+
+  return {
+    ...user,
+    role: user.role === "admin" ? "admin" : "viewer",
+  };
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => {
     try {
       const saved = localStorage.getItem("user");
-      return saved ? JSON.parse(saved) : null;
+      return saved ? normalizeUserRole(JSON.parse(saved)) : null;
     } catch {
       return null;
     }
@@ -28,8 +39,9 @@ export const AuthProvider = ({ children }) => {
 
       try {
         const meRes = await authApi.me();
-        setUser(meRes.data.user);
-        localStorage.setItem("user", JSON.stringify(meRes.data.user));
+        const normalizedUser = normalizeUserRole(meRes.data.user);
+        setUser(normalizedUser);
+        localStorage.setItem("user", JSON.stringify(normalizedUser));
       } catch (err) {
         try {
           const refreshRes = await authApi.refresh();
@@ -38,8 +50,9 @@ export const AuthProvider = ({ children }) => {
           localStorage.setItem("accessToken", newToken);
 
           const meRes = await authApi.me();
-          setUser(meRes.data.user);
-          localStorage.setItem("user", JSON.stringify(meRes.data.user));
+          const normalizedUser = normalizeUserRole(meRes.data.user);
+          setUser(normalizedUser);
+          localStorage.setItem("user", JSON.stringify(normalizedUser));
         } catch (refreshErr) {
           localStorage.removeItem("accessToken");
           localStorage.removeItem("user");
@@ -58,7 +71,8 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     const res = await authApi.login(email, password);
 
-    const { token, user } = res.data;
+    const { token } = res.data;
+    const user = normalizeUserRole(res.data.user);
 
     localStorage.setItem("accessToken", token);
     localStorage.setItem("user", JSON.stringify(user));

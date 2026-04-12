@@ -104,7 +104,7 @@ const Landing = () => {
             <div className="feature-card">
               <div className="feature-icon">👥</div>
               <h3>Role-Based Access</h3>
-              <p>Separate admin, analyst, and user access with protected routes and APIs</p>
+                <p>Separate admin and viewer access with protected routes and server-side RBAC</p>
             </div>
 
             <div className="feature-card">

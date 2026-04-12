@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MainLayout from "../layout/MainLayout";
 import { logs } from "../services/api";
 import useSocket from "../hooks/useSocket";
+import { useAuth } from "../context/AuthContext";
 
 const formatBytes = (value) => {
   const bytes = Number(value || 0);
@@ -12,6 +13,7 @@ const formatBytes = (value) => {
 };
 
 const Logs = () => {
+  const { user } = useAuth();
   const [logList, setLogList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -28,6 +30,7 @@ const Logs = () => {
   const [simulateCount, setSimulateCount] = useState(10);
 
   const limit = 20;
+  const isAdmin = user?.role === "admin";
   const token = localStorage.getItem("accessToken");
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -245,15 +248,17 @@ const Logs = () => {
 
       <div className="card">
         <h3>Ingestion Tools</h3>
+        {!isAdmin && <p>Viewer access is read-only. Upload and simulation actions are disabled.</p>}
 
         <div className="action-row">
           <input
             type="file"
             accept=".json,.csv"
+            disabled={!isAdmin}
             onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
           />
 
-          <button className="scan-btn" onClick={handleUpload} disabled={!uploadFile}>
+          <button className="scan-btn" onClick={handleUpload} disabled={!isAdmin || !uploadFile}>
             Upload Logs
           </button>
 
@@ -263,10 +268,11 @@ const Logs = () => {
             min="1"
             max="200"
             value={simulateCount}
+            disabled={!isAdmin}
             onChange={(e) => setSimulateCount(Number(e.target.value))}
           />
 
-          <button className="scan-btn" onClick={handleSimulate}>
+          <button className="scan-btn" onClick={handleSimulate} disabled={!isAdmin}>
             Simulate Traffic
           </button>
         </div>
