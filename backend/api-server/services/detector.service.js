@@ -20,6 +20,10 @@ const severityToRiskScore = {
   Low: 34
 };
 
+const TELEMETRY_SOURCES = new Set(["agent", "simulator", "upload", "ids-engine"]);
+
+const isTelemetryLog = (log) => TELEMETRY_SOURCES.has(log.source);
+
 const appendRelatedLog = async (alert, logId) => {
   if (!alert.relatedLogs.some((id) => id.toString() === logId.toString())) {
     alert.relatedLogs.push(logId);
@@ -67,6 +71,10 @@ const upsertAlert = async ({
 };
 
 const evaluateBruteForce = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
   if (log.eventType !== "auth.login" || log.metadata?.success !== false) {
     return null;
   }
@@ -117,6 +125,10 @@ const evaluateUnauthorizedAdminAccess = async (log) => {
 };
 
 const evaluateDosBurst = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
   if (log.eventType !== "request") {
     return null;
   }
@@ -145,6 +157,10 @@ const evaluateDosBurst = async (log) => {
 };
 
 const evaluateSuspiciousIp = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
   if (!log.ip) {
     return null;
   }
@@ -171,12 +187,136 @@ const evaluateSuspiciousIp = async (log) => {
   return null;
 };
 
+const evaluatePortScan = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
+  if (!log.ip) {
+    return null;
+  }
+
+  const destinations = await Log.distinct("metadata.destinationPort", {
+    _org_id: log._org_id,
+    ip: log.ip,
+    eventType: "request",
+    timestamp: { $gte: windowStart() }
+  });
+
+  const validDestinations = destinations.filter((value) => value !== null && value !== undefined);
+
+  if (validDestinations.length >= 10) {
+    return upsertAlert({
+      orgId: log._org_id,
+      attackType: "Port Scan Activity",
+      type: "Port Scan Activity",
+      ip: log.ip || "unknown",
+      severity: "High",
+      confidence: severityToConfidence.High,
+      risk_score: severityToRiskScore.High,
+      relatedLogs: [log._id]
+    });
+  }
+
+  return null;
+};
+
+const evaluateCredentialStuffing = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
+  if (log.eventType !== "request") {
+    return null;
+  }
+
+  const destinationPort = Number(log.metadata?.destinationPort || log.metadata?.port || 0);
+  const isWebLogin = [80, 443, 8080].includes(destinationPort) || /login/i.test(log.endpoint || "");
+  const failedAttempts = Number(log.metadata?.failedAttempts || 0);
+  const requestRate = Number(log.metadata?.requestRate || 0);
+
+  if (!isWebLogin || failedAttempts < 6 || requestRate < 80) {
+    return null;
+  }
+
+  return upsertAlert({
+    orgId: log._org_id,
+    attackType: "Credential Stuffing Attempt",
+    type: "Credential Stuffing Attempt",
+    ip: log.ip || "unknown",
+    severity: "High",
+    confidence: 0.86,
+    risk_score: 79,
+    relatedLogs: [log._id]
+  });
+};
+
+const evaluateDataExfiltration = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
+  if (log.eventType !== "request") {
+    return null;
+  }
+
+  const bytes = Number(log.metadata?.bytes || 0);
+  const flowCount = Number(log.metadata?.flowCount || 0);
+
+  if (bytes < 90000 || flowCount < 12) {
+    return null;
+  }
+
+  return upsertAlert({
+    orgId: log._org_id,
+    attackType: "Potential Data Exfiltration",
+    type: "Potential Data Exfiltration",
+    ip: log.ip || "unknown",
+    severity: "Critical",
+    confidence: severityToConfidence.Critical,
+    risk_score: 88,
+    relatedLogs: [log._id]
+  });
+};
+
+const evaluateSmbLateralMovement = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
+  if (log.eventType !== "request") {
+    return null;
+  }
+
+  const destinationPort = Number(log.metadata?.destinationPort || log.metadata?.port || 0);
+  const smbWrites = Number(log.metadata?.smbWrites || log.metadata?.smb_writes || 0);
+
+  if (destinationPort !== 445 || smbWrites < 20) {
+    return null;
+  }
+
+  return upsertAlert({
+    orgId: log._org_id,
+    attackType: "Suspicious SMB Lateral Movement",
+    type: "Suspicious SMB Lateral Movement",
+    ip: log.ip || "unknown",
+    severity: "High",
+    confidence: 0.8,
+    risk_score: 76,
+    relatedLogs: [log._id]
+  });
+};
+
 const evaluateLog = async (log) => {
   await Promise.all([
     evaluateBruteForce(log),
     evaluateUnauthorizedAdminAccess(log),
     evaluateDosBurst(log),
-    evaluateSuspiciousIp(log)
+    evaluateSuspiciousIp(log),
+    evaluatePortScan(log),
+    evaluateCredentialStuffing(log),
+    evaluateDataExfiltration(log),
+    evaluateSmbLateralMovement(log)
   ]);
 };
 

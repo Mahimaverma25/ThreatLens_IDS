@@ -229,8 +229,10 @@ const Dashboard = () => {
     fetchStats();
 
     const interval = setInterval(() => {
-      fetchStats();
-    }, 15000);
+      if (document.visibilityState === "visible") {
+        fetchStats();
+      }
+    }, 30000);
 
     return () => {
       clearInterval(interval);

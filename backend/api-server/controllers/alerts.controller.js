@@ -113,6 +113,7 @@ const updateAlertStatus = async (req, res) => {
 const scanAndStore = async (req, res) => {
 	try {
 		const response = await axios.get(`${config.idsEngineUrl}/scan`, {
+			params: { samples: 12 },
 			timeout: 5000
 		});
 

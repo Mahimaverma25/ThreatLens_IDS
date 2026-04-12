@@ -31,7 +31,7 @@ const getSeverityHint = (sample) => {
 };
 
 const generateTrafficSample = () => {
-  const destinationPort = pick([22, 53, 80, 123, 443, 445, 8080]);
+  const destinationPort = pick([22, 53, 80, 123, 443, 445, 8080, 3306, 3389]);
   const protocol =
     destinationPort === 22
       ? "SSH"
@@ -47,6 +47,9 @@ const generateTrafficSample = () => {
   const failedAttempts =
     destinationPort === 22 ? Math.floor(Math.random() * 9) : Math.floor(Math.random() * 4);
   const flowCount = Math.floor(Math.random() * 25) + 1;
+  const uniquePorts = Math.floor(Math.random() * 18) + 1;
+  const dnsQueries = destinationPort === 53 ? Math.floor(Math.random() * 130) : 0;
+  const smbWrites = destinationPort === 445 ? Math.floor(Math.random() * 45) : 0;
   const requestRate = Math.floor(Math.random() * 220) + 5;
   const sourceCountry = pick(countries);
   const destinationCountry = pick(countries);
@@ -62,6 +65,9 @@ const generateTrafficSample = () => {
     failedAttempts,
     flags: protocol === "UDP" ? ["NONE"] : [pick(tcpFlags), pick(tcpFlags)],
     flowCount,
+    uniquePorts,
+    dnsQueries,
+    smbWrites,
     requestRate,
     endpoint: pick(endpoints),
     method: pick(["GET", "POST", "PUT", "DELETE"]),

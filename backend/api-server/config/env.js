@@ -29,7 +29,7 @@ module.exports = {
 	corsOrigins: getList(process.env.CORS_ORIGIN, ["http://localhost:3000"]),
 	idsEngineUrl: process.env.IDS_ENGINE_URL || "http://localhost:8000",
 	rateLimitWindowMs: getNumber(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
-	rateLimitMax: getNumber(process.env.RATE_LIMIT_MAX, 100),
+	rateLimitMax: getNumber(process.env.RATE_LIMIT_MAX, 1000),
 	authRateLimitMax: getNumber(process.env.AUTH_RATE_LIMIT_MAX, 15),
 	bodyLimit: process.env.BODY_LIMIT || "1mb",
 	refreshCookieName: process.env.REFRESH_COOKIE_NAME || "threatlens_rt",
