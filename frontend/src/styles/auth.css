@@ -69,6 +69,29 @@
   color: #ff9ba5;
 }
 
+.success-message,
+.info-message {
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  border-radius: 14px;
+}
+
+.success-message {
+  border: 1px solid rgba(101, 244, 187, 0.26);
+  background: rgba(11, 80, 61, 0.45);
+  color: #8df5d0;
+}
+
+.info-message {
+  border: 1px solid rgba(88, 203, 255, 0.26);
+  background: rgba(10, 39, 74, 0.45);
+  color: #8ddfff;
+}
+
+.info-message a {
+  color: #c5f2ff;
+}
+
 .form-group {
   margin-bottom: 18px;
 }

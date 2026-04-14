@@ -3,8 +3,12 @@ const mongoose = require("mongoose");
 const Alert = require("../models/Alerts");
 const Log = require("../models/Log");
 const config = require("../config/env");
+const { generateTrafficBatch } = require("../services/traffic.service");
+const { evaluateLog } = require("../services/detector.service");
 
 const TIME_WINDOW_HOURS = 24;
+const TELEMETRY_SOURCES = ["agent", "simulator", "upload", "ids-engine"];
+const DEMO_ACTIVITY_WINDOW_MINUTES = 5;
 
 const buildTimelineBuckets = (logs) => {
   const buckets = new Map();
@@ -68,11 +72,66 @@ const averageMetric = (logs, accessor) => {
   return Number((sumMetric(logs, accessor) / logs.length).toFixed(2));
 };
 
+const buildDemoLogs = (orgId, count = 12) => {
+  const now = Date.now();
+
+  return generateTrafficBatch(count).map((sample, index) => ({
+    message: `${sample.protocol} traffic sample on port ${sample.destinationPort}`,
+    level:
+      sample.severityHint === "Critical" || sample.severityHint === "High"
+        ? "warn"
+        : "info",
+    source: "simulator",
+    ip: sample.ip,
+    endpoint: sample.endpoint,
+    method: sample.method,
+    statusCode: sample.statusCode,
+    eventType: "request",
+    metadata: sample,
+    _org_id: orgId,
+    timestamp: new Date(now - index * 45 * 1000),
+  }));
+};
+
+const ensureDevelopmentTelemetry = async (orgId) => {
+  if (config.nodeEnv === "production") {
+    return;
+  }
+
+  const recentTelemetryCount = await Log.countDocuments({
+    _org_id: orgId,
+    source: { $in: TELEMETRY_SOURCES },
+    timestamp: {
+      $gte: new Date(Date.now() - DEMO_ACTIVITY_WINDOW_MINUTES * 60 * 1000),
+    },
+  });
+
+  if (recentTelemetryCount > 0) {
+    return;
+  }
+
+  const seededLogs = await Log.insertMany(buildDemoLogs(orgId, 10));
+
+  for (const log of seededLogs) {
+    await evaluateLog(log);
+  }
+};
+
 const getStats = async (req, res) => {
   try {
+    await ensureDevelopmentTelemetry(req.orgId);
+
     // CRITICAL: Filter all statistics by organization to prevent cross-org data leakage
     const orgFilter = { _org_id: req.orgId };
+    const telemetryFilter = {
+      ...orgFilter,
+      source: { $in: TELEMETRY_SOURCES },
+    };
     const recentLogFilter = {
+      ...telemetryFilter,
+      timestamp: { $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000) }
+    };
+    const recentAlertFilter = {
       ...orgFilter,
       timestamp: { $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000) }
     };
@@ -93,10 +152,10 @@ const getStats = async (req, res) => {
       Alert.countDocuments({ ...orgFilter, severity: "High" }),
       Alert.countDocuments({ ...orgFilter, severity: "Medium" }),
       Alert.countDocuments({ ...orgFilter, severity: "Low" }),
-      Log.countDocuments(orgFilter),
+      Log.countDocuments(telemetryFilter),
       Alert.findOne(orgFilter).sort({ timestamp: -1 }),
       Log.find(recentLogFilter).sort({ timestamp: -1 }).limit(500),
-      Alert.find(recentLogFilter).sort({ timestamp: -1 }).limit(200)
+      Alert.find(recentAlertFilter).sort({ timestamp: -1 }).limit(200)
     ]);
 
     const protocolDistribution = groupCounts(
@@ -166,7 +225,8 @@ const getStats = async (req, res) => {
         sourceCountries,
         destinationCountries,
         topSourceIps,
-        timeline
+        timeline,
+        recentLogs: recentLogs.slice(0, 8)
       },
       lastDetectionTime: latestAlert?.timestamp || null
     });

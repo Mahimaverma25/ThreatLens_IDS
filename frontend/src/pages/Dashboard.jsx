@@ -28,6 +28,7 @@ const SEVERITY_COLORS = {
 };
 
 const PROTOCOL_COLORS = ["#3a86ff", "#00b4d8", "#4cc9f0", "#90e0ef", "#ffbe0b", "#fb5607"];
+const TELEMETRY_SOURCES = new Set(["agent", "simulator", "upload", "ids-engine"]);
 
 const formatCompact = (value) =>
   new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(
@@ -111,6 +112,8 @@ const Dashboard = () => {
       const healthData =
         healthRes.status === "fulfilled" ? healthRes.value?.data ?? {} : {};
 
+      const telemetryLogs = logData.filter((item) => TELEMETRY_SOURCES.has(item.source));
+
       const severityCount = (level) =>
         alertsData.filter((item) => item.severity === level).length;
 
@@ -120,7 +123,7 @@ const Dashboard = () => {
         highSeverity: statsData?.alerts?.high ?? severityCount("High"),
         mediumSeverity: statsData?.alerts?.medium ?? severityCount("Medium"),
         lowSeverity: statsData?.alerts?.low ?? severityCount("Low"),
-        recentLogs: logData.slice(0, 8),
+        recentLogs: statsData?.analytics?.recentLogs ?? telemetryLogs.slice(0, 8),
         topAttackTypes: statsData?.analytics?.topAttackTypes ?? [],
         topPorts: statsData?.analytics?.topPorts ?? [],
         protocolDistribution: statsData?.analytics?.protocolDistribution ?? [],
@@ -134,7 +137,7 @@ const Dashboard = () => {
           avgRequestRate: statsData?.traffic?.avgRequestRate ?? 0,
           totalFailedAttempts: statsData?.traffic?.totalFailedAttempts ?? 0,
           avgFlowCount: statsData?.traffic?.avgFlowCount ?? 0,
-          eventsLast24h: statsData?.traffic?.eventsLast24h ?? logData.length
+          eventsLast24h: statsData?.traffic?.eventsLast24h ?? telemetryLogs.length
         },
         health: {
           database: healthData?.database ?? "unknown",

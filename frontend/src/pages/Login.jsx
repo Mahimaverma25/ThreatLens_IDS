@@ -7,6 +7,8 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [previewUrl, setPreviewUrl] = useState("");
   const [loading, setLoading] = useState(false);
 
   const { login } = useAuth();
@@ -15,6 +17,8 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setInfo("");
+    setPreviewUrl("");
     setLoading(true);
 
     try {
@@ -32,11 +36,19 @@ const Login = () => {
       }
     } catch (err) {
       console.error("Login error:", err);
-      setError(
-        err?.response?.data?.message ||
-        err?.message ||
-        "Login failed. Please try again."
-      );
+      if (err?.response?.data?.verificationRequired) {
+        setInfo(
+          err?.response?.data?.message ||
+          "Email verification required. Check your inbox before signing in."
+        );
+        setPreviewUrl(err?.response?.data?.previewUrl || "");
+      } else {
+        setError(
+          err?.response?.data?.message ||
+          err?.message ||
+          "Login failed. Please try again."
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -53,6 +65,12 @@ const Login = () => {
         </p>
 
         {error && <div className="error-message">{error}</div>}
+        {info && <div className="info-message">{info}</div>}
+        {previewUrl && (
+          <div className="info-message">
+            Development preview link: <a href={previewUrl}>Open verification link</a>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -88,6 +106,9 @@ const Login = () => {
 
         <p className="auth-link">
           Don&apos;t have an account? <Link to="/register">Create one now</Link>
+        </p>
+        <p className="auth-link">
+          Need to verify? <Link to="/verify-email">Open verification page</Link>
         </p>
       </div>
     </div>

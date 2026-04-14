@@ -10,8 +10,10 @@ const {
   login,
   me,
   refresh,
-  logout
-} = require("../controllers/auth.controller");
+  logout,
+  verifyEmail,
+  resendVerification
+} = require("../controllers/authEmailVerification.controller");
 
 /* ========================
    REGISTER
@@ -58,6 +60,37 @@ router.post(
   ],
   validateRequest,
   asyncHandler(login)
+);
+
+router.post(
+  "/verify-email",
+  [
+    body("email")
+      .trim()
+      .isEmail()
+      .withMessage("Valid email is required")
+      .normalizeEmail(),
+
+    body("token")
+      .trim()
+      .notEmpty()
+      .withMessage("Verification token is required")
+  ],
+  validateRequest,
+  asyncHandler(verifyEmail)
+);
+
+router.post(
+  "/resend-verification",
+  [
+    body("email")
+      .trim()
+      .isEmail()
+      .withMessage("Valid email is required")
+      .normalizeEmail()
+  ],
+  validateRequest,
+  asyncHandler(resendVerification)
 );
 
 /* ========================

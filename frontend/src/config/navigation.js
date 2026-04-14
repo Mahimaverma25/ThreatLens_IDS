@@ -5,7 +5,8 @@ export const navigationSections = [
       { label: "Dashboard", path: "/dashboard", shortLabel: "DB", roles: ["admin", "viewer"] },
       { label: "Alerts", path: "/alerts", shortLabel: "AL", roles: ["admin", "viewer"] },
       { label: "Logs", path: "/logs", shortLabel: "LG", roles: ["admin", "viewer"] },
-      { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "viewer"] }
+      { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "viewer"] },
+      { label: "Threat Map", path: "/threat-map", shortLabel: "TM", roles: ["admin", "viewer"] }
     ]
   },
   {

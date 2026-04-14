@@ -12,6 +12,7 @@ import ProtectedRoute from "./context/ProtectedRoute";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import VerifyEmail from "./pages/VerifyEmail";
 
 import Dashboard from "./pages/Dashboard";
 import Alerts from "./pages/Alerts";
@@ -25,6 +26,7 @@ import Reports from "./pages/Reports";
 import AccessManagement from "./pages/AccessManagement";
 import ModelHealth from "./pages/ModelHealth";
 import ResponsePlaybooks from "./pages/ResponsePlaybooks";
+import ThreatMap from "./pages/ThreatMap";
 
 import "./App.css";
 
@@ -103,6 +105,14 @@ function App() {
               </div>
             }
           />
+          <Route
+            path="/verify-email"
+            element={
+              <div className="app-page-background" style={pageBackgroundStyle}>
+                <VerifyEmail />
+              </div>
+            }
+          />
 
           {/* ================= ALERTS ================= */}
           <Route
@@ -173,6 +183,15 @@ function App() {
             element={
               <AppPage allowedRoles={["admin", "viewer"]}>
                 <Reports />
+              </AppPage>
+            }
+          />
+
+          <Route
+            path="/threat-map"
+            element={
+              <AppPage allowedRoles={["admin", "viewer"]}>
+                <ThreatMap />
               </AppPage>
             }
           />

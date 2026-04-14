@@ -2,13 +2,13 @@
   "name": "threatLens-agent",
   "version": "1.0.0",
   "description": "ThreatLens Agent - Lightweight security event collector",
-  "main": "agent.js",
+  "main": "realtime-agent.js",
   "engines": {
     "node": "18.0.0"
   },
   "scripts": {
-    "start": "node agent.js",
-    "dev": "nodemon agent.js",
+    "start": "node realtime-agent.js",
+    "dev": "nodemon realtime-agent.js",
     "test": "jest"
   },
   "keywords": [

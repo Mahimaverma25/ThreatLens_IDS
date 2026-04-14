@@ -12,12 +12,58 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 // Models
 const Organization = require("./models/Organization");
 const Asset = require("./models/Asset");
 const APIKey = require("./models/APIKey");
 const User = require("./models/User");
+
+function syncAgentEnv({ apiUrl, token, secret, assetId }) {
+  try {
+    const agentEnvPath = path.resolve(__dirname, "..", "agent", ".env");
+    let content = "";
+
+    if (fs.existsSync(agentEnvPath)) {
+      content = fs.readFileSync(agentEnvPath, "utf8");
+    }
+
+    const upsert = (key, value) => {
+      const line = `${key}=${value}`;
+      const pattern = new RegExp(`^${key}=.*$`, "m");
+      if (pattern.test(content)) {
+        content = content.replace(pattern, line);
+      } else {
+        content = `${content.trim()}\n${line}\n`.trimStart();
+      }
+    };
+
+    upsert("THREATLENS_API_URL", apiUrl);
+    upsert("THREATLENS_API_KEY", token);
+    upsert("THREATLENS_API_SECRET", secret);
+    upsert("ASSET_ID", assetId);
+
+    if (!/LOG_LEVEL=/m.test(content)) {
+      content += `${content.endsWith("\n") ? "" : "\n"}LOG_LEVEL=info\n`;
+    }
+    if (!/BATCH_SIZE=/m.test(content)) {
+      content += "BATCH_SIZE=20\n";
+    }
+    if (!/BATCH_TIMEOUT_MS=/m.test(content)) {
+      content += "BATCH_TIMEOUT_MS=10000\n";
+    }
+    if (!/HEALTH_CHECK_INTERVAL_MS=/m.test(content)) {
+      content += "HEALTH_CHECK_INTERVAL_MS=60000\n";
+    }
+
+    fs.writeFileSync(agentEnvPath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
+    console.log(`✅ Synced agent credentials to ${agentEnvPath}`);
+  } catch (error) {
+    console.warn("⚠ Failed to sync agent .env automatically:", error.message);
+  }
+}
 
 async function setupDevKeys() {
   try {
@@ -122,6 +168,13 @@ async function setupDevKeys() {
     console.log(`THREATLENS_API_SECRET=${generatedSecret}`);
     console.log(`ASSET_ID=${asset.asset_id}`);
     console.log(`\n${'='.repeat(60)}\n`);
+
+    syncAgentEnv({
+      apiUrl,
+      token: apiKey.token,
+      secret: generatedSecret,
+      assetId: asset.asset_id
+    });
 
     // Verify the API key works
     console.log("🔍 Verifying API key setup...");
