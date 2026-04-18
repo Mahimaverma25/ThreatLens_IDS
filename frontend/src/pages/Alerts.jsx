@@ -16,7 +16,8 @@ const Alerts = () => {
   const [filters, setFilters] = useState({
     status: "",
     severity: "",
-    search: ""
+    search: "",
+    source: ""
   });
 
   const limit = 20;
@@ -209,6 +210,18 @@ const Alerts = () => {
             setFilters((prev) => ({ ...prev, search: e.target.value }));
           }}
         />
+
+        <select
+          value={filters.source}
+          onChange={(e) => {
+            setPage(1);
+            setFilters((prev) => ({ ...prev, source: e.target.value }));
+          }}
+        >
+          <option value="">All sources</option>
+          <option value="snort">Live Snort</option>
+          <option value="ids-engine">IDS Scan</option>
+        </select>
 
         <select
           value={filters.severity}

@@ -2,8 +2,10 @@ require("dotenv").config();
 
 const axios = require("axios");
 const crypto = require("crypto");
-const { v4: uuidv4 } = require("uuid");
+const fs = require("fs");
+const { Tail } = require("tail");
 const winston = require("winston");
+const { parseFastAlertLine, parseEveJsonLine } = require("./snort-parsers");
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
@@ -20,16 +22,28 @@ const logger = winston.createLogger({
   ],
 });
 
+const splitList = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
 const config = {
   apiUrl: process.env.THREATLENS_API_URL || "http://localhost:5000",
   apiKey: process.env.THREATLENS_API_KEY || "",
   apiSecret: process.env.THREATLENS_API_SECRET || "",
   assetId: process.env.ASSET_ID || "agent-001",
-  intervalMs: Number.parseInt(process.env.EVENT_INTERVAL_MS || "2000", 10),
+  agentMode: (process.env.AGENT_MODE || "snort").trim().toLowerCase(),
   batchSize: Number.parseInt(process.env.BATCH_SIZE || "20", 10),
-  batchTimeoutMs: Number.parseInt(process.env.BATCH_TIMEOUT_MS || "10000", 10),
+  batchTimeoutMs: Number.parseInt(process.env.BATCH_TIMEOUT_MS || "5000", 10),
   healthCheckIntervalMs: Number.parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || "60000", 10),
   maxRetries: 3,
+  snortFastLogPaths: splitList(
+    process.env.SNORT_FAST_LOG_PATHS || process.env.SNORT_FAST_LOG_PATH || process.env.SNORT_ALERT_FILE || ""
+  ),
+  snortJsonLogPaths: splitList(
+    process.env.SNORT_EVE_JSON_PATHS || process.env.SNORT_EVE_JSON_PATH || ""
+  ),
 };
 
 class APIClient {
@@ -60,7 +74,7 @@ class APIClient {
         .update(`${timestamp}.${body}`)
         .digest("hex");
 
-      logger.info(`Sending ${logs.length} logs (attempt ${attempt})`);
+      logger.info(`Sending ${logs.length} live log(s) to ThreatLens (attempt ${attempt})`);
 
       const response = await this.client.post("/api/logs/ingest", payload, {
         headers: {
@@ -108,149 +122,89 @@ class APIClient {
   }
 }
 
-class EventCollector {
-  constructor(assetId) {
-    this.assetId = assetId;
-    this.counter = 0;
-    this.countries = ["US", "IN", "DE", "SG", "AU", "BR", "JP", "GB", "NL", "CA"];
-    this.endpoints = [
-      "/api/auth/login",
-      "/api/logs",
-      "/api/alerts",
-      "/dashboard",
-      "/reports/export",
-      "/admin/users",
-    ];
+class SnortLogCollector {
+  constructor(runtimeConfig, onEvent) {
+    this.onEvent = onEvent;
+    this.watchers = [];
+    this.fastLogPaths = runtimeConfig.snortFastLogPaths;
+    this.jsonLogPaths = runtimeConfig.snortJsonLogPaths;
   }
 
-  pick(values) {
-    return values[Math.floor(Math.random() * values.length)];
+  watchFile(filePath, parser, label) {
+    if (!fs.existsSync(filePath)) {
+      logger.warn(`${label} file not found: ${filePath}`);
+      return;
+    }
+
+    const watcher = new Tail(filePath, {
+      fromBeginning: false,
+      fsWatchOptions: { interval: 1000 },
+      useWatchFile: true,
+    });
+
+    watcher.on("line", (line) => {
+      const parsed = parser(line);
+      if (!parsed) {
+        return;
+      }
+
+      this.onEvent(parsed);
+    });
+
+    watcher.on("error", (error) => {
+      logger.error(`Tail error for ${filePath}: ${error.message}`);
+    });
+
+    this.watchers.push(watcher);
+    logger.info(`Watching ${label} file: ${filePath}`);
   }
 
-  randomIp() {
-    return `192.168.${Math.floor(Math.random() * 6) + 1}.${Math.floor(Math.random() * 254) + 1}`;
+  start() {
+    this.fastLogPaths.forEach((filePath) => {
+      this.watchFile(filePath, parseFastAlertLine, "Snort fast alert");
+    });
+
+    this.jsonLogPaths.forEach((filePath) => {
+      this.watchFile(filePath, parseEveJsonLine, "Snort EVE JSON");
+    });
+
+    if (this.watchers.length === 0) {
+      logger.warn("No Snort log files configured. Set SNORT_FAST_LOG_PATH or SNORT_EVE_JSON_PATH.");
+    }
   }
 
-  buildBaseMetadata() {
-    return {
-      uuid: uuidv4(),
-      asset_id: this.assetId,
-      count: this.counter,
-      sourceCountry: this.pick(this.countries),
-      destinationCountry: this.pick(this.countries),
-    };
-  }
-
-  buildRequestEvent() {
-    const destinationPort = this.pick([22, 53, 80, 443, 445, 8080, 3306, 3389]);
-    const protocol =
-      destinationPort === 22
-        ? "SSH"
-        : destinationPort === 443
-          ? "HTTPS"
-          : destinationPort === 80 || destinationPort === 8080
-            ? "HTTP"
-            : destinationPort === 53
-              ? "UDP"
-              : "TCP";
-
-    const requestRate = Math.floor(Math.random() * 260) + 10;
-    const failedAttempts =
-      destinationPort === 22 || destinationPort === 443
-        ? Math.floor(Math.random() * 10)
-        : Math.floor(Math.random() * 4);
-
-    return {
-      message: `${protocol} traffic observed on port ${destinationPort}`,
-      level: requestRate > 200 || failedAttempts > 6 ? "warn" : "info",
-      source: "agent",
-      eventType: "request",
-      ip: this.randomIp(),
-      endpoint: this.pick(this.endpoints),
-      timestamp: new Date().toISOString(),
-      metadata: {
-        ...this.buildBaseMetadata(),
-        protocol,
-        bytes: Math.floor(Math.random() * 115000) + 1500,
-        duration: Number((Math.random() * 20 + 0.2).toFixed(2)),
-        destinationPort,
-        port: destinationPort,
-        requestRate,
-        failedAttempts,
-        flowCount: Math.floor(Math.random() * 25) + 1,
-        uniquePorts: Math.floor(Math.random() * 18) + 1,
-        dnsQueries: destinationPort === 53 ? Math.floor(Math.random() * 140) : 0,
-        smbWrites: destinationPort === 445 ? Math.floor(Math.random() * 42) : 0,
-      },
-    };
-  }
-
-  buildAuthFailureEvent() {
-    return {
-      message: "Repeated login failures detected",
-      level: "warn",
-      source: "agent",
-      eventType: "auth.login",
-      ip: this.randomIp(),
-      timestamp: new Date().toISOString(),
-      metadata: {
-        ...this.buildBaseMetadata(),
-        success: false,
-        username: this.pick(["admin", "finance", "ops", "service", "viewer"]),
-        failedAttempts: Math.floor(Math.random() * 8) + 3,
-      },
-    };
-  }
-
-  buildMalwareEvent() {
-    return {
-      message: "Suspicious malware beaconing activity detected",
-      level: "error",
-      source: "agent",
-      eventType: "request",
-      ip: this.randomIp(),
-      endpoint: "/command-and-control/checkin",
-      timestamp: new Date().toISOString(),
-      metadata: {
-        ...this.buildBaseMetadata(),
-        protocol: "HTTPS",
-        bytes: Math.floor(Math.random() * 90000) + 25000,
-        duration: Number((Math.random() * 24 + 2).toFixed(2)),
-        destinationPort: 443,
-        port: 443,
-        requestRate: Math.floor(Math.random() * 180) + 60,
-        failedAttempts: Math.floor(Math.random() * 3),
-        flowCount: Math.floor(Math.random() * 18) + 10,
-        uniquePorts: Math.floor(Math.random() * 6) + 1,
-      },
-    };
-  }
-
-  collectEvent() {
-    this.counter += 1;
-
-    const generator = this.pick([
-      () => this.buildRequestEvent(),
-      () => this.buildRequestEvent(),
-      () => this.buildRequestEvent(),
-      () => this.buildAuthFailureEvent(),
-      () => this.buildMalwareEvent(),
-    ]);
-
-    return generator();
+  stop() {
+    this.watchers.forEach((watcher) => watcher.unwatch());
+    this.watchers = [];
   }
 }
 
 class ThreatLensAgent {
   constructor(runtimeConfig) {
     this.apiClient = new APIClient(runtimeConfig);
-    this.collector = new EventCollector(runtimeConfig.assetId);
-    this.intervalMs = runtimeConfig.intervalMs;
+    this.mode = runtimeConfig.agentMode;
     this.batchSize = runtimeConfig.batchSize;
     this.batchTimeoutMs = runtimeConfig.batchTimeoutMs;
     this.healthCheckIntervalMs = runtimeConfig.healthCheckIntervalMs;
     this.buffer = [];
     this.flushTimer = null;
+    this.healthTimer = null;
+    this.collector = new SnortLogCollector(runtimeConfig, (event) => this.enqueueEvent(event));
+  }
+
+  enqueueEvent(event) {
+    this.buffer.push(event);
+    logger.info(`Live Snort event buffered: ${event.message} (buffer: ${this.buffer.length})`);
+    this.scheduleFlush();
+
+    if (this.buffer.length >= this.batchSize) {
+      if (this.flushTimer) {
+        clearTimeout(this.flushTimer);
+        this.flushTimer = null;
+      }
+
+      void this.flushBuffer();
+    }
   }
 
   async flushBuffer() {
@@ -280,7 +234,7 @@ class ThreatLensAgent {
   }
 
   async start() {
-    logger.info("ThreatLens Agent starting");
+    logger.info(`ThreatLens Agent starting in ${this.mode} mode`);
 
     const healthy = await this.apiClient.healthCheck();
     if (healthy) {
@@ -289,26 +243,14 @@ class ThreatLensAgent {
       logger.warn("Backend not reachable at startup");
     }
 
-    setInterval(async () => {
-      try {
-        const event = this.collector.collectEvent();
-        this.buffer.push(event);
-        logger.info(`Event collected (buffer: ${this.buffer.length})`);
-        this.scheduleFlush();
+    if (this.mode !== "snort") {
+      logger.warn(`Unsupported AGENT_MODE "${this.mode}". Only "snort" is enabled in this build.`);
+      return;
+    }
 
-        if (this.buffer.length >= this.batchSize) {
-          if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-          }
-          await this.flushBuffer();
-        }
-      } catch (error) {
-        logger.error(`Error collecting event: ${error.message}`);
-      }
-    }, this.intervalMs);
+    this.collector.start();
 
-    setInterval(async () => {
+    this.healthTimer = setInterval(async () => {
       const healthyNow = await this.apiClient.healthCheck();
       if (healthyNow) {
         logger.info("Backend heartbeat ok");
@@ -320,11 +262,15 @@ class ThreatLensAgent {
       if (this.flushTimer) {
         clearTimeout(this.flushTimer);
       }
+      if (this.healthTimer) {
+        clearInterval(this.healthTimer);
+      }
+      this.collector.stop();
       await this.flushBuffer();
       process.exit();
     });
 
-    logger.info("Agent running");
+    logger.info("Agent running and waiting for live Snort events");
   }
 }
 

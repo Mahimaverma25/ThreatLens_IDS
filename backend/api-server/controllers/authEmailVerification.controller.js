@@ -81,6 +81,11 @@ const issueVerificationForUser = async (user) => {
 
 const isVerificationPending = (user) => user.emailVerified === false;
 
+const formatVerificationInstructions = (deliveryMode) =>
+  deliveryMode === "preview"
+    ? "Registration successful. A development preview link is ready for email verification."
+    : "Registration successful. Check your inbox for a verification email to activate your account.";
+
 const register = async (req, res) => {
   try {
     let { email, password, username, orgName } = req.body || {};
@@ -154,9 +159,10 @@ const register = async (req, res) => {
     }
 
     return res.status(201).json({
-      message: "Registration successful. Verify your email to activate your account.",
+      message: formatVerificationInstructions(verification.delivery.deliveryMode),
       verificationRequired: true,
       deliveryMode: verification.delivery.deliveryMode,
+      email: user.email,
       previewUrl:
         config.nodeEnv === "development" ? verification.delivery.previewUrl : undefined,
       user: user.toJSON(),
@@ -204,13 +210,10 @@ const login = async (req, res) => {
     }
 
     if (isVerificationPending(user)) {
-      const verification = await issueVerificationForUser(user);
       return res.status(403).json({
-        message: "Email verification required. A verification email has been sent.",
+        message: "Your email address is not verified yet. Check your inbox to continue, or request a new verification email.",
         verificationRequired: true,
-        deliveryMode: verification.delivery.deliveryMode,
-        previewUrl:
-          config.nodeEnv === "development" ? verification.delivery.previewUrl : undefined,
+        email: user.email,
       });
     }
 
@@ -322,6 +325,7 @@ const resendVerification = async (req, res) => {
       message: "Verification email sent successfully.",
       verificationRequired: true,
       deliveryMode: verification.delivery.deliveryMode,
+      email: user.email,
       previewUrl:
         config.nodeEnv === "development" ? verification.delivery.previewUrl : undefined,
     });

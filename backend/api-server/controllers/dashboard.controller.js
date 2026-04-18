@@ -7,7 +7,7 @@ const { generateTrafficBatch } = require("../services/traffic.service");
 const { evaluateLog } = require("../services/detector.service");
 
 const TIME_WINDOW_HOURS = 24;
-const TELEMETRY_SOURCES = ["agent", "simulator", "upload", "ids-engine"];
+const TELEMETRY_SOURCES = ["agent", "simulator", "upload", "ids-engine", "snort"];
 const DEMO_ACTIVITY_WINDOW_MINUTES = 5;
 
 const buildTimelineBuckets = (logs) => {
@@ -94,7 +94,7 @@ const buildDemoLogs = (orgId, count = 12) => {
 };
 
 const ensureDevelopmentTelemetry = async (orgId) => {
-  if (config.nodeEnv === "production") {
+  if (config.nodeEnv === "production" || !config.enableDemoTelemetry) {
     return;
   }
 

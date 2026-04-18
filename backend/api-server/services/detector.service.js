@@ -20,7 +20,7 @@ const severityToRiskScore = {
   Low: 34
 };
 
-const TELEMETRY_SOURCES = new Set(["agent", "simulator", "upload", "ids-engine"]);
+const TELEMETRY_SOURCES = new Set(["agent", "simulator", "upload", "ids-engine", "snort"]);
 
 const isTelemetryLog = (log) => TELEMETRY_SOURCES.has(log.source);
 
@@ -40,7 +40,8 @@ const upsertAlert = async ({
   type,
   relatedLogs,
   confidence,
-  risk_score
+  risk_score,
+  source = "ids-engine"
 }) => {
   const existing = await Alert.findOne({
     _org_id: orgId,
@@ -66,7 +67,7 @@ const upsertAlert = async ({
     confidence,
     risk_score,
     relatedLogs,
-    source: "ids-engine"
+    source
   });
 };
 
@@ -307,8 +308,52 @@ const evaluateSmbLateralMovement = async (log) => {
   });
 };
 
+const getSnortSeverity = (priority) => {
+  const value = Number(priority || 0);
+
+  if (value <= 1) {
+    return "Critical";
+  }
+
+  if (value === 2) {
+    return "High";
+  }
+
+  if (value === 3) {
+    return "Medium";
+  }
+
+  return "Low";
+};
+
+const evaluateSnortAlert = async (log) => {
+  if (log.source !== "snort" || log.eventType !== "snort.alert") {
+    return null;
+  }
+
+  const attackType =
+    log.metadata?.snort?.message ||
+    log.metadata?.attackType ||
+    log.message ||
+    "Snort Alert";
+  const severity = getSnortSeverity(log.metadata?.snort?.priority);
+
+  return upsertAlert({
+    orgId: log._org_id,
+    attackType,
+    type: attackType,
+    ip: log.ip || log.metadata?.snort?.srcIp || "unknown",
+    severity,
+    confidence: severityToConfidence[severity],
+    risk_score: severityToRiskScore[severity],
+    relatedLogs: [log._id],
+    source: "snort"
+  });
+};
+
 const evaluateLog = async (log) => {
   await Promise.all([
+    evaluateSnortAlert(log),
     evaluateBruteForce(log),
     evaluateUnauthorizedAdminAccess(log),
     evaluateDosBurst(log),

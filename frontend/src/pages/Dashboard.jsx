@@ -28,7 +28,7 @@ const SEVERITY_COLORS = {
 };
 
 const PROTOCOL_COLORS = ["#3a86ff", "#00b4d8", "#4cc9f0", "#90e0ef", "#ffbe0b", "#fb5607"];
-const TELEMETRY_SOURCES = new Set(["agent", "simulator", "upload", "ids-engine"]);
+const TELEMETRY_SOURCES = new Set(["agent", "simulator", "upload", "ids-engine", "snort"]);
 
 const formatCompact = (value) =>
   new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(

@@ -214,9 +214,9 @@ const Logs = () => {
           }}
         >
           <option value="">All sources</option>
-          <option value="request">Request</option>
-          <option value="auth">Auth</option>
-          <option value="ids-engine">IDS</option>
+          <option value="snort">Live Snort</option>
+          <option value="upload">Upload</option>
+          <option value="ids-engine">IDS Scan</option>
           <option value="simulator">Simulator</option>
         </select>
 

@@ -33,6 +33,9 @@ const listAlerts = async (req, res) => {
 		if (req.query.severity) {
 			filters.severity = req.query.severity;
 		}
+		if (req.query.source) {
+			filters.source = req.query.source;
+		}
 		if (req.query.ip) {
 			filters.ip = req.query.ip;
 		}

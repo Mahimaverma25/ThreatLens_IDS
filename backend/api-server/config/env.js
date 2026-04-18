@@ -38,6 +38,10 @@ module.exports = {
 	refreshCookieSecure: process.env.REFRESH_COOKIE_SECURE === "true",
 	refreshCookieSameSite: process.env.REFRESH_COOKIE_SAMESITE || "lax",
 	emailVerificationExpiryMinutes: getNumber(process.env.EMAIL_VERIFICATION_EXPIRY_MINUTES, 30),
+	enableDemoTelemetry:
+		process.env.ENABLE_DEMO_TELEMETRY === undefined
+			? (process.env.NODE_ENV || "development") !== "production"
+			: process.env.ENABLE_DEMO_TELEMETRY === "true",
 	smtpHost: process.env.SMTP_HOST || "",
 	smtpPort: getNumber(process.env.SMTP_PORT, 587),
 	smtpSecure: process.env.SMTP_SECURE === "true",
