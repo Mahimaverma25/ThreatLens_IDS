@@ -21,18 +21,24 @@ const createAsset = async (req, res) => {
     const asset = await Asset.create({
       asset_id,
       asset_name,
-      asset_type, // web_server, api, database, network, endpoint, etc.
-      asset_criticality: asset_criticality || "medium", // low, medium, high, critical
+      asset_type,
+      asset_criticality: asset_criticality || "medium",
       hostname: hostname || asset_name,
       ip_address: ip_address || null,
       _org_id: req.orgId,
-      asset_status: "active",
-      agent_status: "pending", // Waiting for agent to connect
-      created_by: req.user.sub,
+      status: "active",
+      agent_status: "offline",
       baseline: {
         avg_requests_per_minute: 0,
+        avg_errors_per_minute: 0,
         typical_users: [],
-        typical_geographies: []
+        typical_geographies: [],
+        working_hours: {
+          days: [],
+          start_hour: 0,
+          end_hour: 23,
+          timezone: "UTC"
+        }
       },
       suppression_rules: []
     });
@@ -60,9 +66,9 @@ const createAsset = async (req, res) => {
         asset_type: asset.asset_type,
         hostname: asset.hostname,
         ip_address: asset.ip_address,
-        asset_status: asset.asset_status,
+        asset_status: asset.status,
         agent_status: asset.agent_status,
-        created_at: asset.createdAt
+        created_at: asset.created_at
       }
     });
   } catch (error) {
@@ -80,12 +86,12 @@ const listAssets = async (req, res) => {
     const { status, agent_status } = req.query;
     const filters = { _org_id: req.orgId };
 
-    if (status) filters.asset_status = status;
+    if (status) filters.status = status;
     if (agent_status) filters.agent_status = agent_status;
 
     const assets = await Asset.find(filters)
       .select("-baseline -suppression_rules") // Exclude detailed data for list
-      .sort({ createdAt: -1 });
+      .sort({ created_at: -1 });
 
     return res.json({
       data: assets.map(asset => ({
@@ -96,10 +102,10 @@ const listAssets = async (req, res) => {
         asset_criticality: asset.asset_criticality,
         hostname: asset.hostname,
         ip_address: asset.ip_address,
-        asset_status: asset.asset_status,
+        asset_status: asset.status,
         agent_status: asset.agent_status,
-        last_activity: asset.last_activity,
-        created_at: asset.createdAt
+        last_activity: asset.agent_last_seen,
+        created_at: asset.created_at
       })),
       total: assets.length
     });
@@ -134,13 +140,12 @@ const getAsset = async (req, res) => {
       asset_criticality: asset.asset_criticality,
       hostname: asset.hostname,
       ip_address: asset.ip_address,
-      asset_status: asset.asset_status,
+      asset_status: asset.status,
       agent_status: asset.agent_status,
       baseline: asset.baseline,
       suppression_rules: asset.suppression_rules,
-      last_activity: asset.last_activity,
-      created_at: asset.createdAt,
-      created_by: asset.created_by
+      last_activity: asset.agent_last_seen,
+      created_at: asset.created_at
     });
   } catch (error) {
     console.error("GET ASSET ERROR:", error);
@@ -156,14 +161,15 @@ const getAsset = async (req, res) => {
 const updateAsset = async (req, res) => {
   try {
     const { id } = req.params;
-    const { asset_name, asset_criticality, hostname, ip_address, asset_status } = req.body;
+    const { asset_name, asset_criticality, hostname, ip_address, asset_status, status } = req.body;
 
     const updates = {};
     if (asset_name) updates.asset_name = asset_name;
     if (asset_criticality) updates.asset_criticality = asset_criticality;
     if (hostname) updates.hostname = hostname;
-    if (ip_address) updates.ip_address = ip_address;
-    if (asset_status) updates.asset_status = asset_status;
+    if (ip_address !== undefined) updates.ip_address = ip_address;
+    if (asset_status) updates.status = asset_status;
+    if (status) updates.status = status;
 
     const asset = await Asset.findOneAndUpdate(
       { _id: id, _org_id: req.orgId },
@@ -198,7 +204,7 @@ const updateAsset = async (req, res) => {
         asset_type: asset.asset_type,
         hostname: asset.hostname,
         ip_address: asset.ip_address,
-        asset_status: asset.asset_status,
+        asset_status: asset.status,
         agent_status: asset.agent_status
       }
     });
@@ -252,15 +258,15 @@ const deleteAsset = async (req, res) => {
 /**
  * Add suppression rule to asset
  * POST /api/assets/:id/suppression-rules
- * Body: { rule_type, pattern, description }
+ * Body: { rule_type, condition, reason }
  */
 const addSuppressionRule = async (req, res) => {
   try {
     const { id } = req.params;
-    const { rule_type, pattern, description } = req.body;
+    const { rule_type, condition, reason } = req.body;
 
-    if (!rule_type || !pattern) {
-      return res.status(400).json({ message: "rule_type and pattern are required" });
+    if (!rule_type || !condition) {
+      return res.status(400).json({ message: "rule_type and condition are required" });
     }
 
     const asset = await Asset.findOneAndUpdate(
@@ -268,11 +274,10 @@ const addSuppressionRule = async (req, res) => {
       {
         $push: {
           suppression_rules: {
-            rule_id: uuidv4(),
-            rule_type, // ip_whitelist, path_whitelist, user_whitelist
-            pattern,
-            description: description || "",
-            created_at: new Date()
+            _id: uuidv4(),
+            rule_type,
+            condition,
+            reason: reason || ""
           }
         }
       },
@@ -303,7 +308,7 @@ const removeSuppressionRule = async (req, res) => {
 
     const asset = await Asset.findOneAndUpdate(
       { _id: id, _org_id: req.orgId },
-      { $pull: { suppression_rules: { rule_id } } },
+      { $pull: { suppression_rules: { _id: rule_id } } },
       { new: true }
     );
 

@@ -61,6 +61,7 @@ const AlertSchema = new mongoose.Schema({
   resolvedAt: { type: Date },
   relatedLogs: [{ type: mongoose.Schema.Types.ObjectId, ref: "Log" }],
   source: { type: String, default: "ids-engine", trim: true },
+  metadata: { type: Object, default: {} },
   timestamp: {
     type: Date,
     default: Date.now,
@@ -69,7 +70,7 @@ const AlertSchema = new mongoose.Schema({
 });
 
 // Indexes for multi-tenant queries
-AlertSchema.index({ _org_id: 1, created_at: -1 });
+AlertSchema.index({ _org_id: 1, timestamp: -1 });
 AlertSchema.index({ _org_id: 1, status: 1, severity: -1 });
 AlertSchema.index({ _org_id: 1, _incident_id: 1 });
 AlertSchema.index({ _org_id: 1, ip: 1 });

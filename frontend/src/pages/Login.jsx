@@ -32,25 +32,11 @@ const Login = () => {
       }
     } catch (err) {
       console.error("Login error:", err);
-      if (err?.response?.data?.verificationRequired) {
-        const emailAddress = err?.response?.data?.email || email.trim();
-        navigate(`/verify-email?email=${encodeURIComponent(emailAddress)}`, {
-          replace: true,
-          state: {
-            status: "info",
-            message:
-              err?.response?.data?.message ||
-              "Your email address is not verified yet. Check your inbox or request a new verification email.",
-          },
-        });
-        return;
-      } else {
-        setError(
-          err?.response?.data?.message ||
-          err?.message ||
-          "Login failed. Please try again."
-        );
-      }
+      setError(
+        err?.response?.data?.message ||
+        err?.message ||
+        "Login failed. Please try again."
+      );
     } finally {
       setLoading(false);
     }

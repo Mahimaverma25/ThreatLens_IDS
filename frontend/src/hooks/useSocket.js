@@ -6,30 +6,66 @@ const SOCKET_URL = apiBase.replace(/\/api\/?$/, "");
 
 const useSocket = (token, handlers = {}) => {
   const socketRef = useRef(null);
+  const handlersRef = useRef(handlers);
+
+  useEffect(() => {
+    handlersRef.current = handlers;
+  }, [handlers]);
 
   useEffect(() => {
     if (!token) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
       return undefined;
     }
 
     const socket = io(SOCKET_URL, {
-      transports: ["websocket"],
-      auth: { token }
+      auth: { token },
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      timeout: 10000,
     });
 
     socketRef.current = socket;
 
-    Object.entries(handlers).forEach(([event, handler]) => {
+    const attachHandlers = () => {
+      Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
+        socket.off(event);
+        socket.on(event, handler);
+      });
+    };
+
+    attachHandlers();
+
+    return () => {
+      Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
+        socket.off(event, handler);
+      });
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) {
+      return undefined;
+    }
+
+    Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
+      socket.off(event);
       socket.on(event, handler);
     });
 
     return () => {
-      Object.entries(handlers).forEach(([event, handler]) => {
+      Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
         socket.off(event, handler);
       });
-      socket.disconnect();
     };
-  }, [token, handlers]);
+  }, [handlers]);
 
   return socketRef.current;
 };

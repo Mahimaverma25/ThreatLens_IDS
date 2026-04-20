@@ -2,18 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MainLayout from "../layout/MainLayout";
 import { logs } from "../services/api";
 import useSocket from "../hooks/useSocket";
-import { useAuth } from "../context/AuthContext";
-
-const formatBytes = (value) => {
-  const bytes = Number(value || 0);
-
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${bytes} B`;
-};
 
 const Logs = () => {
-  const { user } = useAuth();
   const [logList, setLogList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -21,16 +11,13 @@ const Logs = () => {
   const [total, setTotal] = useState(0);
   const [filters, setFilters] = useState({
     level: "",
-    source: "",
+    source: "snort",
     protocol: "",
     destinationPort: "",
     search: ""
   });
-  const [uploadFile, setUploadFile] = useState(null);
-  const [simulateCount, setSimulateCount] = useState(10);
 
   const limit = 20;
-  const isAdmin = user?.role === "admin";
   const token = localStorage.getItem("accessToken");
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -95,46 +82,35 @@ const Logs = () => {
     };
   }, [fetchLogs]);
 
-  const handleUpload = async () => {
-    if (!uploadFile) return;
-
-    try {
-      setError("");
-      await logs.upload(uploadFile);
-      setUploadFile(null);
-      fetchLogs();
-    } catch (err) {
-      console.error("Upload error:", err);
-      setError("Failed to upload logs");
-    }
-  };
-
-  const handleSimulate = async () => {
-    try {
-      setError("");
-      await logs.simulate(simulateCount);
-      fetchLogs();
-    } catch (err) {
-      console.error("Simulate error:", err);
-      setError("Failed to simulate traffic");
-    }
-  };
-
   const trafficSummary = useMemo(() => {
     const totals = logList.reduce(
       (accumulator, log) => {
-        accumulator.bytes += Number(log.metadata?.bytes || 0);
-        accumulator.failedAttempts += Number(log.metadata?.failedAttempts || 0);
-        accumulator.avgRate += Number(log.metadata?.requestRate || 0);
+        if ((log.metadata?.snort?.priority || 0) <= 1) {
+          accumulator.critical += 1;
+        }
+
+        if ((log.metadata?.snort?.priority || 0) === 2) {
+          accumulator.high += 1;
+        }
+
+        if (log.metadata?.snort?.srcIp || log.ip) {
+          accumulator.sourceIps.add(log.metadata?.snort?.srcIp || log.ip);
+        }
+
+        if (log.metadata?.snort?.destIp) {
+          accumulator.destinationIps.add(log.metadata.snort.destIp);
+        }
+
         return accumulator;
       },
-      { bytes: 0, failedAttempts: 0, avgRate: 0 }
+      { critical: 0, high: 0, sourceIps: new Set(), destinationIps: new Set() }
     );
 
     return {
-      bytes: totals.bytes,
-      failedAttempts: totals.failedAttempts,
-      avgRate: logList.length ? Math.round(totals.avgRate / logList.length) : 0
+      critical: totals.critical,
+      high: totals.high,
+      uniqueSources: totals.sourceIps.size,
+      uniqueDestinations: totals.destinationIps.size
     };
   }, [logList]);
 
@@ -153,10 +129,10 @@ const Logs = () => {
       <section className="command-header">
         <div>
           <div className="command-eyebrow">Network / ThreatLens / Telemetry</div>
-          <h1>Network Event Logs</h1>
+          <h1>Live Snort Event Stream</h1>
           <p>
-            Review network flows with protocol, bytes, duration, failed attempts,
-            destination ports, and request-rate telemetry.
+            Review real Snort alerts as they arrive through the agent, including signatures,
+            classifications, priorities, source IPs, destination IPs, and protocols.
           </p>
         </div>
       </section>
@@ -169,16 +145,20 @@ const Logs = () => {
           <strong>{logList.length}</strong>
         </div>
         <div className="metric-card">
-          <span>Total Bytes</span>
-          <strong>{formatBytes(trafficSummary.bytes)}</strong>
+          <span>Critical Priority</span>
+          <strong>{trafficSummary.critical}</strong>
         </div>
         <div className="metric-card">
-          <span>Failed Attempts</span>
-          <strong>{trafficSummary.failedAttempts}</strong>
+          <span>High Priority</span>
+          <strong>{trafficSummary.high}</strong>
         </div>
         <div className="metric-card">
-          <span>Avg Request Rate</span>
-          <strong>{trafficSummary.avgRate}/min</strong>
+          <span>Unique Sources</span>
+          <strong>{trafficSummary.uniqueSources}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Unique Destinations</span>
+          <strong>{trafficSummary.uniqueDestinations}</strong>
         </div>
       </section>
 
@@ -213,11 +193,10 @@ const Logs = () => {
             setFilters((prev) => ({ ...prev, source: e.target.value }));
           }}
         >
-          <option value="">All sources</option>
           <option value="snort">Live Snort</option>
-          <option value="upload">Upload</option>
-          <option value="ids-engine">IDS Scan</option>
-          <option value="simulator">Simulator</option>
+          <option value="">All real sources</option>
+          <option value="request">Backend Requests</option>
+          <option value="upload">Uploaded Logs</option>
         </select>
 
         <select
@@ -247,52 +226,18 @@ const Logs = () => {
       </div>
 
       <div className="card">
-        <h3>Ingestion Tools</h3>
-        {!isAdmin && <p>Viewer access is read-only. Upload and simulation actions are disabled.</p>}
-
-        <div className="action-row">
-          <input
-            type="file"
-            accept=".json,.csv"
-            disabled={!isAdmin}
-            onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-          />
-
-          <button className="scan-btn" onClick={handleUpload} disabled={!isAdmin || !uploadFile}>
-            Upload Logs
-          </button>
-
-          <input
-            className="note-input"
-            type="number"
-            min="1"
-            max="200"
-            value={simulateCount}
-            disabled={!isAdmin}
-            onChange={(e) => setSimulateCount(Number(e.target.value))}
-          />
-
-          <button className="scan-btn" onClick={handleSimulate} disabled={!isAdmin}>
-            Simulate Traffic
-          </button>
-        </div>
-      </div>
-
-      <div className="card">
         {logList?.length > 0 ? (
           <>
             <table>
               <thead>
                 <tr>
-                  <th>Message</th>
+                  <th>Signature</th>
+                  <th>Classification</th>
+                  <th>Priority</th>
                   <th>Protocol</th>
-                  <th>Bytes</th>
-                  <th>Duration</th>
-                  <th>Flags</th>
+                  <th>Source IP</th>
+                  <th>Destination IP</th>
                   <th>Dest Port</th>
-                  <th>Req Rate</th>
-                  <th>Flow Count</th>
-                  <th>IP</th>
                   <th>Timestamp</th>
                 </tr>
               </thead>
@@ -301,16 +246,14 @@ const Logs = () => {
                 {logList.map((log) => (
                   <tr key={log._id}>
                     <td className="message-cell">{log.message}</td>
+                    <td>{log.metadata?.snort?.classification || "-"}</td>
+                    <td>{log.metadata?.snort?.priority || "-"}</td>
                     <td>{log.metadata?.protocol || "-"}</td>
-                    <td>{formatBytes(log.metadata?.bytes)}</td>
-                    <td>{log.metadata?.duration ? `${log.metadata.duration}s` : "-"}</td>
-                    <td>{Array.isArray(log.metadata?.flags) ? log.metadata.flags.join(", ") : "-"}</td>
+                    <td className="ip-cell">{log.metadata?.snort?.srcIp || log.ip || "-"}</td>
+                    <td className="ip-cell">{log.metadata?.snort?.destIp || "-"}</td>
                     <td className="mono-text">
                       {log.metadata?.destinationPort || log.metadata?.port || "-"}
                     </td>
-                    <td>{log.metadata?.requestRate || "-"}</td>
-                    <td>{log.metadata?.flowCount || "-"}</td>
-                    <td className="ip-cell">{log.ip || "-"}</td>
                     <td>
                       {log.timestamp ? new Date(log.timestamp).toLocaleString() : "-"}
                     </td>
@@ -340,7 +283,10 @@ const Logs = () => {
             </div>
           </>
         ) : (
-          <p>No logs available yet.</p>
+          <p>
+            No Snort logs available yet. Keep the ThreatLens agent running and generate or ingest a
+            Snort alert to populate this table.
+          </p>
         )}
       </div>
 

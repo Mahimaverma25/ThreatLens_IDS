@@ -16,6 +16,11 @@ const LogSchema = new mongoose.Schema({
     index: true
   },
 
+  eventId: {
+    type: String,
+    trim: true
+  },
+
   message: { type: String, required: true, trim: true },
   level: { type: String, default: "info", trim: true, index: true },
   source: { type: String, default: "api", trim: true },
@@ -37,5 +42,6 @@ const LogSchema = new mongoose.Schema({
 LogSchema.index({ _org_id: 1, timestamp: -1 });
 LogSchema.index({ _org_id: 1, level: 1 });
 LogSchema.index({ _org_id: 1, _asset_id: 1, timestamp: -1 });
+LogSchema.index({ _org_id: 1, eventId: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("Log", LogSchema);

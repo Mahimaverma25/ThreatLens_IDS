@@ -3,13 +3,10 @@ import { Link } from "react-router-dom";
 import MainLayout from "../layout/MainLayout";
 import { alerts } from "../services/api";
 import useSocket from "../hooks/useSocket";
-import { useAuth } from "../context/AuthContext";
 
 const Alerts = () => {
-  const { user } = useAuth();
   const [alertList, setAlertList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -21,7 +18,6 @@ const Alerts = () => {
   });
 
   const limit = 20;
-  const isAdmin = user?.role === "admin";
   const token = localStorage.getItem("accessToken");
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -87,20 +83,6 @@ const Alerts = () => {
     };
   }, [fetchAlerts]);
 
-  const handleScan = async () => {
-    try {
-      setScanning(true);
-      setError("");
-      await alerts.scan();
-      fetchAlerts();
-    } catch (err) {
-      console.error("Scan error:", err);
-      setError("Scan failed");
-    } finally {
-      setScanning(false);
-    }
-  };
-
   const getSeverityColor = (severity) => {
     switch (severity?.toUpperCase()) {
       case "CRITICAL":
@@ -154,9 +136,9 @@ const Alerts = () => {
       <section className="command-header">
         <div>
           <div className="command-eyebrow">ThreatLens / Detection / Incidents</div>
-          <h1>Security Alerts</h1>
+          <h1>Live Snort Alerts</h1>
           <p>
-            Ranked intrusion alerts with severity, confidence, risk score, and analyst status.
+            Real-time intrusion alerts generated from live Snort events, correlation rules, and the connected ML analysis pipeline.
           </p>
         </div>
       </section>
@@ -191,16 +173,6 @@ const Alerts = () => {
       </section>
 
       <div className="controls">
-        {isAdmin ? (
-          <button onClick={handleScan} disabled={scanning} className="scan-btn">
-            {scanning ? "Scanning..." : "Run Scan"}
-          </button>
-        ) : (
-          <button disabled className="scan-btn">
-            Read-only access
-          </button>
-        )}
-
         <input
           className="search-input"
           placeholder="Search attack type or keyword"
@@ -218,9 +190,10 @@ const Alerts = () => {
             setFilters((prev) => ({ ...prev, source: e.target.value }));
           }}
         >
-          <option value="">All sources</option>
+          <option value="">All alert sources</option>
           <option value="snort">Live Snort</option>
-          <option value="ids-engine">IDS Scan</option>
+          <option value="ids-engine-ml">ML Anomalies</option>
+          <option value="rule-engine">Rule Engine</option>
         </select>
 
         <select
@@ -315,7 +288,7 @@ const Alerts = () => {
             </div>
           </>
         ) : (
-          <p>No alerts detected yet. Run a scan to check for threats.</p>
+          <p>No alerts detected yet.</p>
         )}
       </div>
     </MainLayout>

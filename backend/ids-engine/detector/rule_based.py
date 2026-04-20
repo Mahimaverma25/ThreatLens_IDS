@@ -98,6 +98,41 @@ def _evaluate_sample(sample):
             "risk_score": 76
         })
 
+    if protocol in ["HTTP", "HTTPS"] and port in [80, 443, 8080] and failed_attempts >= 4 and request_rate >= 70:
+        alerts.append({
+            "type": "Web Exploitation / SQLi Probe",
+            "ip": sample["ip"],
+            "severity": "High",
+            "protocol": protocol,
+            "destination_port": port,
+            "failed_attempts": failed_attempts,
+            "confidence": 0.8,
+            "risk_score": 74
+        })
+
+    if port in [21, 23, 3389, 6379]:
+        alerts.append({
+            "type": "Sensitive Service Exposure",
+            "ip": sample["ip"],
+            "severity": "High" if port != 23 else "Critical",
+            "protocol": protocol,
+            "destination_port": port,
+            "confidence": 0.78,
+            "risk_score": 72 if port != 23 else 86
+        })
+
+    if protocol == "UDP" and port == 53 and dns_queries >= 110:
+        alerts.append({
+            "type": "DNS Tunneling / Covert Channel",
+            "ip": sample["ip"],
+            "severity": "High",
+            "protocol": protocol,
+            "destination_port": port,
+            "dns_queries": dns_queries,
+            "confidence": 0.84,
+            "risk_score": 79
+        })
+
     return alerts
 
 

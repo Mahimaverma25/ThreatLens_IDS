@@ -1,52 +1,96 @@
 require("dotenv").config();
 
-const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
+const cors = require("cors");
+const express = require("express");
+const helmet = require("helmet");
 const http = require("http");
+const mongoose = require("mongoose");
 
 const config = require("./config/env");
 const { connectDB } = require("./config/db");
 const authenticate = require("./middleware/auth.middleware");
+const { orgIsolation } = require("./middleware/orgIsolation.middleware");
 const { apiLimiter, authLimiter } = require("./middleware/rateLimit");
 const requestLogger = require("./middleware/requestLogger");
-const { orgIsolation } = require("./middleware/orgIsolation.middleware");
 const { initSocket } = require("./socket");
 
-// Routes
 const alertRoutes = require("./routes/alerts.routes");
-const authRoutes = require("./routes/auth.routes");
-const logRoutes = require("./routes/log.routes");
-const dashboardRoutes = require("./routes/dashboard.routes");
-const reportRoutes = require("./routes/report.routes");
 const apikeyRoutes = require("./routes/apikey.routes");
 const assetRoutes = require("./routes/asset.routes");
+const authRoutes = require("./routes/auth.routes");
+const dashboardRoutes = require("./routes/dashboard.routes");
+const logsRoutes = require("./routes/logs.routes");
+const reportRoutes = require("./routes/report.routes");
 const userRoutes = require("./routes/user.routes");
 
 const app = express();
 const server = http.createServer(app);
 
-/* ================= BASIC CONFIG ================= */
-
 app.set("trust proxy", 1);
 
-/* ================= SECURITY ================= */
+/* --------------------------------- Helpers -------------------------------- */
+
+const normalizeOrigins = (origins) => {
+  if (!origins) return [];
+
+  if (Array.isArray(origins)) {
+    return origins
+      .map((origin) => String(origin).trim())
+      .filter(Boolean);
+  }
+
+  if (typeof origins === "string") {
+    return origins
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const allowedOrigins = normalizeOrigins(
+  config.corsOrigins || config.corsOrigin || process.env.CORS_ORIGIN
+);
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true; // Postman, curl, server-to-server
+
+  if (allowedOrigins.length === 0) return true; // fallback for dev
+
+  if (config.nodeEnv !== "production") {
+    try {
+      const parsed = new URL(origin);
+      const isLocalHost =
+        parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+
+      if (isLocalHost) {
+        return true;
+      }
+    } catch {
+      // Ignore parse errors and continue with strict matching below.
+    }
+  }
+
+  return allowedOrigins.includes(origin);
+};
+
+let io = null;
+let isShuttingDown = false;
+
+/* ------------------------------- Middleware -------------------------------- */
 
 app.use(helmet());
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) {
+      if (isAllowedOrigin(origin)) {
         return callback(null, true);
       }
 
-      if (config.corsOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      return callback(new Error("CORS origin not allowed"));
+      return callback(new Error(`CORS origin not allowed: ${origin}`));
     },
     credentials: true,
   })
@@ -54,37 +98,54 @@ app.use(
 
 app.use(cookieParser());
 
-/* ================= BODY PARSER ================= */
+app.use(
+  express.json({
+    limit: config.bodyLimit || "10mb",
+    verify: (req, res, buffer) => {
+      req.rawBody = buffer.toString("utf8");
+    },
+  })
+);
 
-app.use(express.json({ limit: config.bodyLimit }));
-app.use(express.urlencoded({ extended: true, limit: config.bodyLimit }));
-
-/* ================= LOGGER ================= */
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: config.bodyLimit || "10mb",
+  })
+);
 
 app.use(requestLogger);
-
-/* ================= RATE LIMIT ================= */
-
 app.use(apiLimiter);
 
-/* ================= HEALTH CHECK ================= */
+/* -------------------------------- Routes ---------------------------------- */
 
-app.get("/health", (req, res) => {
+app.get("/", (req, res) => {
   res.status(200).json({
+    success: true,
     status: "OK",
-    message: "ThreatLens Backend Running 🚀",
+    message: "ThreatLens backend running",
+    service: "api-server",
+    environment: config.nodeEnv || process.env.NODE_ENV || "development",
+    timestamp: new Date().toISOString(),
   });
 });
 
-/* ================= ROUTES ================= */
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: "OK",
+    message: "ThreatLens backend healthy",
+    timestamp: new Date().toISOString(),
+    environment: config.nodeEnv || process.env.NODE_ENV || "development",
+    database:
+      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    idsEngineUrl: config.idsEngineUrl || null,
+  });
+});
 
-// 🔐 Auth routes
 app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/logs", logsRoutes);
 
-// 🔥 Logs route (agent)
-app.use("/api/logs", logRoutes);
-
-// 🔐 Protected routes
 app.use("/api/alerts", authenticate, orgIsolation, alertRoutes);
 app.use("/api/dashboard", authenticate, orgIsolation, dashboardRoutes);
 app.use("/api/reports", authenticate, orgIsolation, reportRoutes);
@@ -92,15 +153,15 @@ app.use("/api/assets", authenticate, orgIsolation, assetRoutes);
 app.use("/api/admin/api-keys", authenticate, orgIsolation, apikeyRoutes);
 app.use("/api/users", authenticate, orgIsolation, userRoutes);
 
-/* ================= 404 HANDLER ================= */
+/* ----------------------------- 404 / Errors -------------------------------- */
 
 app.use((req, res) => {
   res.status(404).json({
+    success: false,
     message: "Route not found",
+    path: req.originalUrl,
   });
 });
-
-/* ================= ERROR HANDLER ================= */
 
 app.use((err, req, res, next) => {
   console.error("Server Error:", err);
@@ -109,28 +170,131 @@ app.use((err, req, res, next) => {
     return next(err);
   }
 
-  res.status(err.statusCode || 500).json({
+  if (err.message && err.message.includes("CORS origin not allowed")) {
+    return res.status(403).json({
+      success: false,
+      message: err.message,
+    });
+  }
+
+  return res.status(err.statusCode || 500).json({
+    success: false,
     message:
-      process.env.NODE_ENV === "production"
+      config.nodeEnv === "production"
         ? "Internal Server Error"
-        : err.message,
+        : err.message || "Internal Server Error",
   });
 });
 
-/* ================= SOCKET ================= */
+/* ------------------------------ Socket init -------------------------------- */
 
-initSocket(server);
+io = initSocket(server);
 
-/* ================= SERVER START ================= */
-const startServer = async () => {
-  await connectDB();
+/* ---------------------------- Server bootstrap ----------------------------- */
 
-  server.listen(config.port, () => {
-    console.log(`🚀 ThreatLens API running on port ${config.port}`);
+const tryListen = (port) =>
+  new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port);
   });
+
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    let preferredPort = Number(config.port || process.env.PORT || 5001);
+    let activePort = preferredPort;
+    const maxPortRetries = Number(process.env.PORT_RETRY_COUNT || 5);
+
+    for (let attempt = 0; attempt <= maxPortRetries; attempt += 1) {
+      try {
+        await tryListen(activePort);
+
+        console.log(`ThreatLens API running on port ${activePort}`);
+        console.log(`Root: http://localhost:${activePort}/`);
+        console.log(`Health: http://localhost:${activePort}/health`);
+        console.log("Socket.IO initialized");
+        console.log(
+          `Allowed CORS origins: ${
+            allowedOrigins.length ? allowedOrigins.join(", ") : "ALL (dev fallback)"
+          }`
+        );
+
+        return;
+      } catch (error) {
+        if (error.code === "EADDRINUSE") {
+          if (attempt < maxPortRetries) {
+            console.warn(
+              `Port ${activePort} is already in use. Trying port ${activePort + 1}...`
+            );
+            activePort += 1;
+            continue;
+          }
+
+          console.error(
+            `Port ${preferredPort} is already in use, and no free fallback port was found after ${maxPortRetries + 1} attempts.`
+          );
+          process.exit(1);
+        }
+
+        console.error("Server listen error:", error.message);
+        process.exit(1);
+      }
+    }
+  } catch (error) {
+    console.error("Failed to start server:", error.message);
+    process.exit(1);
+  }
 };
 
-startServer().catch((error) => {
-  console.error("Failed to start server:", error.message);
-  process.exit(1);
+/* ---------------------------- Graceful shutdown ---------------------------- */
+
+const shutdown = async (signal) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`\n${signal} received. Shutting down ThreatLens backend...`);
+
+  try {
+    await new Promise((resolve) => {
+      server.close(() => resolve());
+    });
+
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close();
+      console.log("MongoDB connection closed");
+    }
+
+    console.log("ThreatLens backend stopped cleanly");
+    process.exit(0);
+  } catch (error) {
+    console.error("Error during shutdown:", error.message);
+    process.exit(1);
+  }
+};
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+process.on("uncaughtException", async (error) => {
+  console.error("Uncaught Exception:", error);
+  await shutdown("uncaughtException");
 });
+
+process.on("unhandledRejection", async (reason) => {
+  console.error("Unhandled Rejection:", reason);
+  await shutdown("unhandledRejection");
+});
+
+startServer();

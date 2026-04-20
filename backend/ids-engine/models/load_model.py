@@ -1,8 +1,5 @@
-import pickle
+import joblib
 
-def load_attack_model():
 
-    with open("models/attack_model.pkl", "rb") as f:
-        model = pickle.load(f)
-
-    return model
+def load_model(path="models/attack_model.pkl"):
+    return joblib.load(path)

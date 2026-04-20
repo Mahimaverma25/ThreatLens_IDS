@@ -1,15 +1,15 @@
 const jwt = require("jsonwebtoken");
+
 const config = require("../config/env");
 const { normalizeRole } = require("../utils/roles");
 
 const authenticate = (req, res, next) => {
   try {
-    const authHeader = req.headers["authorization"];
-
-    /* ================= JWT AUTH ================= */
-    const token = authHeader && authHeader.startsWith("Bearer ")
-      ? authHeader.split(" ")[1]
-      : null;
+    const authHeader = req.headers.authorization;
+    const token =
+      authHeader && authHeader.startsWith("Bearer ")
+        ? authHeader.split(" ")[1]
+        : null;
 
     if (!token) {
       return res.status(401).json({
@@ -36,12 +36,12 @@ const authenticate = (req, res, next) => {
         role: normalizeRole(decoded.role),
         sub: userId,
         _id: userId,
+        orgId: decoded.orgId || decoded._org_id || null,
       };
 
       return next();
-
     } catch (error) {
-      console.error("❌ JWT Error:", error.message);
+      console.error("JWT error:", error.message);
 
       if (error.name === "TokenExpiredError") {
         return res.status(401).json({
@@ -55,9 +55,8 @@ const authenticate = (req, res, next) => {
         message: "Invalid token",
       });
     }
-
-  } catch (err) {
-    console.error("🔥 Auth Middleware Error:", err);
+  } catch (error) {
+    console.error("Auth middleware error:", error);
 
     return res.status(500).json({
       success: false,

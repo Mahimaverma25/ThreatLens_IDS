@@ -74,8 +74,9 @@ const APIKeySchema = new mongoose.Schema({
 });
 
 // Generate token and secret when creating new key
-APIKeySchema.statics.generate = function(org_id, asset_id, name) {
-  const token = `tlk_${org_id.toString().slice(-8)}_${crypto.randomBytes(16).toString("hex")}`;
+APIKeySchema.statics.generate = function(org_id) {
+  const orgSuffix = org_id ? org_id.toString().slice(-8) : crypto.randomBytes(4).toString("hex");
+  const token = `tlk_${orgSuffix}_${crypto.randomBytes(16).toString("hex")}`;
   const secret = crypto.randomBytes(32).toString("hex");
   const secret_hash = crypto.createHash("sha256").update(secret).digest("hex");
 

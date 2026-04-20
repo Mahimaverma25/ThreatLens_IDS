@@ -28,7 +28,7 @@ const generateAPIKey = async (req, res) => {
     }
 
     // Generate new API key with token + secret
-    const { token, secret } = APIKey.generate();
+    const { token, secret } = APIKey.generate(req.orgId);
 
     // Create API key record
     const apiKey = await APIKey.create({
@@ -88,7 +88,7 @@ const listAPIKeys = async (req, res) => {
     })
       .select("-secret_key_hash") // Never expose hash
       .populate("_asset_id", "asset_id asset_name")
-      .sort({ createdAt: -1 });
+      .sort({ created_at: -1 });
 
     // Add useful computed fields
     const keys = apiKeys.map(key => ({
@@ -97,7 +97,7 @@ const listAPIKeys = async (req, res) => {
       key_name: key.key_name,
       asset: key._asset_id,
       is_active: key.is_active,
-      created_at: key.createdAt,
+      created_at: key.created_at,
       created_by: key.created_by,
       expires_at: key.expires_at,
       last_used_at: key.last_used_at,
@@ -220,7 +220,7 @@ const rotateAPIKey = async (req, res) => {
     }
 
     // Generate new secret
-    const { secret: newSecret } = APIKey.generate();
+    const { secret: newSecret } = APIKey.generate(req.orgId);
 
     // Update key
     apiKey.secret_key_hash = crypto.createHash("sha256").update(newSecret).digest("hex");

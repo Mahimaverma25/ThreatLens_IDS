@@ -1,48 +1,46 @@
 const axios = require("axios");
-const crypto = require("crypto");
 require("dotenv").config();
+
+const { SIGNATURE_VERSION, buildSignature } = require("../ingest-signature");
 
 const apiClient = axios.create({
   baseURL: process.env.THREATLENS_API_URL,
   timeout: 10000,
   headers: {
     "Content-Type": "application/json",
-    "x-api-key": process.env.THREATLENS_API_KEY
-  }
+    "x-api-key": process.env.THREATLENS_API_KEY,
+  },
 });
 
 async function sendEvent(payload) {
   try {
     const timestamp = Date.now().toString();
-    const body = JSON.stringify(payload);
-    const signature = crypto
-      .createHmac("sha256", process.env.THREATLENS_API_SECRET || "")
-      .update(`${timestamp}.${body}`)
-      .digest("hex");
+    const signature = buildSignature({
+      apiSecret: process.env.THREATLENS_API_SECRET || "",
+      timestamp,
+      assetId: process.env.ASSET_ID || "",
+      body: payload,
+    });
 
-    const response = await apiClient.post(
-      "/api/logs/ingest",
-      payload,
-      {
-        headers: {
-          "x-api-secret": process.env.THREATLENS_API_SECRET,
-          "x-timestamp": timestamp,
-          "x-signature": signature,
-          "x-asset-id": process.env.ASSET_ID
-        }
-      }
-    );
+    const response = await apiClient.post("/api/logs/ingest", payload, {
+      headers: {
+        "x-timestamp": timestamp,
+        "x-signature": signature,
+        "x-signature-version": SIGNATURE_VERSION,
+        "x-asset-id": process.env.ASSET_ID,
+      },
+    });
 
-    console.log("✅ Event sent:", response.data);
+    console.log("Event sent:", response.data);
   } catch (error) {
     if (error.response) {
-      console.error("❌ Backend response:", error.response.data);
+      console.error("Backend response:", error.response.data);
     } else {
-      console.error("❌ Network error:", error.message);
+      console.error("Network error:", error.message);
     }
   }
 }
 
 module.exports = {
-  sendEvent
+  sendEvent,
 };

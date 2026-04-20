@@ -1,133 +1,69 @@
 # ThreatLens API Server
 
-This is the Node.js backend for ThreatLens, providing authentication, alerting, logging, and integration with the IDS engine.
+This service is the live backend for ThreatLens.
 
-## Features
-- JWT authentication with refresh token rotation (secure HTTP-only cookies)
-- Role-based access control (admin, analyst, user)
-- Rate limiting, helmet, and CORS for security
-- Audit logging for registration and login
-- Real-time events via Socket.io
-- Modular REST API for alerts, logs, dashboard, and assets
+## Main Responsibilities
 
-## Folder Structure
-```
-api-server/
-    config/
-    controllers/
-    logs/
-    middleware/
-    models/
-    routes/
-    services/
-    utils/
-    server.js
-```
+- authenticate dashboard users with JWT + refresh cookies
+- authenticate agents with API key + signed ingest requests
+- store logs and alerts in MongoDB
+- run the local rule engine
+- call the Python IDS engine for ML analysis
+- emit Socket.io updates to the correct organization room
 
-## Environment Setup
-Copy `.env.example` to `.env` and fill in secrets and MongoDB URI.
+## Important Live Route
 
-## Run Instructions
-```bash
-cd backend/api-server
+`POST /api/logs/ingest`
+
+This is the real ingest path used by the Snort agent.
+
+## Start
+
+```powershell
+cd backend\api-server
+copy .env.example .env
 npm install
 npm start
 ```
 
-## API Endpoints
-- `POST /api/auth/register` — Register new user
-- `POST /api/auth/login` — Login and receive tokens
-- `POST /api/auth/refresh` — Refresh access token
-- `POST /api/auth/logout` — Logout and revoke refresh token
-- `GET /api/auth/me` — Get current user info
+## Key Environment Variables
 
-## Security Best Practices
-- Use strong secrets for JWT and refresh tokens
-- Set `REFRESH_COOKIE_SECURE=true` and use HTTPS in production
-- Set `CORS_ORIGIN` to your frontend URL
-- Never expose secrets or stack traces in production
+```env
+MONGO_URI=mongodb://127.0.0.1:27017/threatlens
+PORT=5000
+JWT_SECRET=change-this
+REFRESH_TOKEN_SECRET=change-this-too
+IDS_ENGINE_URL=http://localhost:8000
+ENABLE_IDS_ANALYSIS=true
+ALLOW_SYNTHETIC_TRAFFIC=false
+```
+
+## Health
+
+- `GET /health`
+- `GET /api/dashboard/health`
+
+The dashboard health route includes:
+
+- database connectivity
+- IDS engine status
+- Snort live status for the current organization
 
 ## Troubleshooting
-- If cookies are not set, check `REFRESH_COOKIE_SECURE` and CORS settings
-- Ensure MongoDB is running and accessible
-- Check logs for errors during registration or login
 
-## Integration
-- Connects to the Python IDS engine at the URL set in `IDS_ENGINE_URL`
-- Designed to work with the ThreatLens frontend and agent
+### Agent ingest fails with `401`
 
-# Backend folder structure
-```
+- the token or secret is wrong
+- the timestamp is too far from server time
+- the `ASSET_ID` does not match the API key’s asset
 
-ThreatLens/
-└── backend/
-    └── api-server/
-        │
-        ├── src/                         # Main source code (keep everything inside src)
-        │
-        │   ├── config/                  # Configuration files
-        │   │   ├── db.js                # MongoDB connection
-        │   │   ├── env.js               # Environment variable loader
-        │   │   └── constants.js         # App constants (roles, status, etc.)
-        │
-        │   ├── controllers/             # Handles request logic
-        │   │   ├── auth.controller.js
-        │   │   ├── log.controller.js
-        │   │   └── user.controller.js
-        │
-        │   ├── routes/                  # API routes
-        │   │   ├── auth.routes.js
-        │   │   ├── log.routes.js
-        │   │   └── user.routes.js
-        │
-        │   ├── models/                  # MongoDB schemas
-        │   │   ├── User.js
-        │   │   ├── Log.js
-        │   │   ├── RefreshToken.js
-        │   │   └── Alert.js             # Optional: separate alerts
-        │
-        │   ├── middleware/              # Middlewares
-        │   │   ├── auth.middleware.js   # JWT verification
-        │   │   ├── error.middleware.js  # Global error handler
-        │   │   ├── rateLimiter.js       # Prevent 429 spam
-        │   │   └── validation.middleware.js
-        │
-        │   ├── services/                # Business logic
-        │   │   ├── detection.service.js # Connect to Python IDS
-        │   │   ├── auth.service.js
-        │   │   └── log.service.js
-        │
-        │   ├── utils/                   # Helper functions
-        │   │   ├── logger.js            # Winston logger
-        │   │   ├── generateToken.js     # JWT token generator
-        │   │   ├── hash.js              # Password hashing
-        │   │   └── response.js          # Standard API responses
-        │
-        │   ├── validators/              # Request validation schemas
-        │   │   ├── auth.validator.js
-        │   │   └── log.validator.js
-        │
-        │   ├── jobs/                    # Background jobs (optional but powerful)
-        │   │   ├── cleanup.job.js       # Delete old logs
-        │   │   └── alert.job.js         # Process alerts
-        │
-        │   ├── docs/                    # API documentation (optional)
-        │   │   └── swagger.json
-        │
-        │   ├── app.js                   # Express app setup
-        │   └── server.js                # Entry point
-        │
-        ├── tests/                      # Testing (optional but recommended)
-        │   ├── auth.test.js
-        │   └── log.test.js
-        │
-        ├── .env                        # Environment variables
-        ├── .env.example                # Sample env file
-        ├── .gitignore
-        ├── package.json
-        ├── package-lock.json
-        ├── README.md
-        └── nodemon.json                # Dev config
+### Logs arrive but no alerts appear
 
-```
+- check MongoDB `Log` documents first
+- then check whether the log source is `snort`
+- then check `metadata.idsEngine` or rule-engine alert creation
 
+### Sockets connect but pages do not update
+
+- verify the JWT includes the correct organization
+- verify the user belongs to the same organization as the ingested asset

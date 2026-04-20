@@ -1,46 +1,47 @@
-import os
-from flask import Flask, jsonify, request
-from detector.rule_based import detect_attack
-from detector.traffic_simulator import generate_traffic
-from detector.anomaly import detect_anomaly
+from flask import Flask, jsonify
+from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
+
+from api.routes import api_bp
+from config import config
 from utils.logger import get_logger
 
 app = Flask(__name__)
+CORS(app)
 logger = get_logger("ids-engine.app")
 
+app.register_blueprint(api_bp)
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"})
+@app.route("/", methods=["GET"])
+def root():
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "message": "ThreatLens IDS engine is running",
+                "health": "/health",
+                "analyze": "/analyze",
+            }
+        ),
+        200,
+    )
 
 
-@app.route("/scan", methods=["GET"])
-def scan_network():
-    try:
-        samples = int(request.args.get("samples", "1"))
-    except ValueError:
-        samples = 1
+@app.route("/favicon.ico", methods=["GET"])
+def favicon():
+    return "", 204
 
-    samples = max(1, min(samples, 50))
-    traffic = generate_traffic(samples)
-
-    alerts = detect_attack(traffic)
-    if isinstance(traffic, list):
-        for sample in traffic:
-            alerts.extend(detect_anomaly(sample))
-    else:
-        alerts.extend(detect_anomaly(traffic))
-
-    return jsonify(alerts) 
-
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    return jsonify({
+        "message": error.description,
+        "code": error.code
+    }), error.code
 
 @app.errorhandler(Exception)
-def handle_error(error):
-    logger.error("Unhandled error: %s", error)
+def handle_unexpected_error(error):
+    logger.exception("Unhandled error")
     return jsonify({"message": "Internal server error"}), 500
 
-
 if __name__ == "__main__":
-    port = int(os.getenv("IDS_ENGINE_PORT", "8000"))
-    debug = os.getenv("IDS_ENGINE_DEBUG", "false").lower() == "true"
-    app.run(port=port, debug=debug)
+    app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

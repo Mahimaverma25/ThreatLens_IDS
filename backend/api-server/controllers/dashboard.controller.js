@@ -1,56 +1,171 @@
-const axios = require("axios");
 const mongoose = require("mongoose");
+
 const Alert = require("../models/Alerts");
+const Asset = require("../models/Asset");
 const Log = require("../models/Log");
-const config = require("../config/env");
-const { generateTrafficBatch } = require("../services/traffic.service");
-const { evaluateLog } = require("../services/detector.service");
+const { getIdsEngineHealth } = require("../services/detection.service");
 
 const TIME_WINDOW_HOURS = 24;
-const TELEMETRY_SOURCES = ["agent", "simulator", "upload", "ids-engine", "snort"];
-const DEMO_ACTIVITY_WINDOW_MINUTES = 5;
+const LIVE_STATUS_WINDOW_MINS = 5;
+const AGENT_STATUS_WINDOW_MINS = 30;
+const DETECTION_ALERT_SOURCES = ["snort", "rule-engine", "ids-engine-ml", "ids-engine"];
 
-const buildTimelineBuckets = (logs) => {
-  const buckets = new Map();
-  const now = Date.now();
+const buildSnortLogMatch = () => ({
+  $or: [{ source: "snort" }, { "metadata.snort": { $exists: true, $ne: null } }]
+});
 
-  for (let index = TIME_WINDOW_HOURS - 1; index >= 0; index -= 1) {
-    const date = new Date(now - index * 60 * 60 * 1000);
-    const key = `${String(date.getHours()).padStart(2, "0")}:00`;
-    buckets.set(key, {
-      time: key,
-      events: 0,
-      bytes: 0,
-      requestRate: 0
-    });
+const buildTelemetryLogMatch = () => ({
+  $or: [
+    { source: "snort" },
+    { source: "agent" },
+    { source: "ids-engine" },
+    { source: "rule-engine" },
+    { source: "ids-engine-ml" },
+    { eventType: "snort.alert" },
+    { "metadata.snort": { $exists: true, $ne: null } },
+    { "metadata.idsEngine": { $exists: true, $ne: null } }
+  ]
+});
+
+const normalizeText = (value) => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
+
+const isUnknownLike = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return !normalized || normalized === "unknown" || normalized === "n/a" || normalized === "-";
+};
+
+const titleCase = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return "Unknown";
+
+  return normalized
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const getProtocol = (log) => {
+  return (
+    log?.metadata?.protocol ||
+    log?.metadata?.appProtocol ||
+    log?.metadata?.snort?.protocol ||
+    log?.protocol ||
+    "Unknown"
+  );
+};
+
+const getMessage = (log) => {
+  return (
+    log?.metadata?.snort?.message ||
+    log?.message ||
+    log?.signature ||
+    "Unknown Event"
+  );
+};
+
+const getSrcIp = (log) => {
+  return (
+    log?.metadata?.snort?.srcIp ||
+    log?.ip ||
+    log?.metadata?.sourceIp ||
+    log?.sourceIp ||
+    "Unknown"
+  );
+};
+
+const getDestIp = (log) => {
+  return (
+    log?.metadata?.snort?.destIp ||
+    log?.metadata?.destinationIp ||
+    log?.destinationIp ||
+    "Unknown"
+  );
+};
+
+const getDestPort = (log) => {
+  const protocol = String(getProtocol(log)).toUpperCase();
+
+  const rawPort =
+    log?.metadata?.snort?.destPort ??
+    log?.metadata?.destinationPort ??
+    log?.metadata?.port ??
+    log?.destPort ??
+    log?.destinationPort ??
+    null;
+
+  if (rawPort !== null && rawPort !== undefined && String(rawPort).trim() !== "") {
+    const value = String(rawPort).trim();
+    if (!isUnknownLike(value)) return value;
   }
 
-  logs.forEach((log) => {
-    if (!log.timestamp) {
-      return;
-    }
+  if (protocol.includes("ICMP")) {
+    return "N/A (ICMP)";
+  }
 
-    const date = new Date(log.timestamp);
-    const key = `${String(date.getHours()).padStart(2, "0")}:00`;
-    if (!buckets.has(key)) {
-      return;
-    }
-
-    const bucket = buckets.get(key);
-    const bytes = Number(log.metadata?.bytes || 0);
-    const requestRate = Number(log.metadata?.requestRate || 0);
-
-    bucket.events += 1;
-    bucket.bytes += bytes;
-    bucket.requestRate += requestRate;
-  });
-
-  return [...buckets.values()];
+  return "Unknown";
 };
+
+const getPriority = (log) => {
+  const raw =
+    log?.metadata?.snort?.priority ??
+    log?.priority ??
+    log?.severityScore ??
+    0;
+
+  const num = Number(raw);
+  return Number.isNaN(num) ? 0 : num;
+};
+
+const deriveClassification = (log) => {
+  const explicit =
+    log?.metadata?.snort?.classification ||
+    log?.classification ||
+    log?.metadata?.classification;
+
+  if (!isUnknownLike(explicit)) {
+    return titleCase(explicit);
+  }
+
+  const message = getMessage(log).toLowerCase();
+  const protocol = String(getProtocol(log)).toLowerCase();
+
+  if (message.includes("icmp")) return "ICMP Activity";
+  if (message.includes("sql")) return "SQL Injection";
+  if (message.includes("xss")) return "XSS Attempt";
+  if (message.includes("brute") || message.includes("login")) return "Brute Force";
+  if (message.includes("scan") || message.includes("portscan") || message.includes("port scan")) {
+    return "Port Scan";
+  }
+  if (message.includes("flood") || message.includes("ddos") || message.includes("dos")) {
+    return "DoS / Flood";
+  }
+  if (protocol.includes("icmp")) return "ICMP Activity";
+  if (protocol.includes("tcp")) return "TCP Activity";
+  if (protocol.includes("udp")) return "UDP Activity";
+
+  return "General Threat";
+};
+
+const normalizeLog = (log) => ({
+  ...log.toObject?.() ? log.toObject() : log,
+  derived: {
+    message: getMessage(log),
+    protocol: getProtocol(log),
+    classification: deriveClassification(log),
+    srcIp: getSrcIp(log),
+    destIp: getDestIp(log),
+    destPort: getDestPort(log),
+    priority: getPriority(log)
+  }
+});
 
 const groupCounts = (items, accessor, limit = 6) => {
   const counts = items.reduce((accumulator, item) => {
-    const key = accessor(item) || "Unknown";
+    const rawKey = accessor(item);
+    const key = !isUnknownLike(rawKey) ? String(rawKey).trim() : "Unknown";
     accumulator[key] = (accumulator[key] || 0) + 1;
     return accumulator;
   }, {});
@@ -61,79 +176,145 @@ const groupCounts = (items, accessor, limit = 6) => {
     .slice(0, limit);
 };
 
-const sumMetric = (logs, accessor) =>
-  logs.reduce((total, log) => total + Number(accessor(log) || 0), 0);
+const hasDerivedProtocol = (log) => !isUnknownLike(log?.derived?.protocol);
+const hasDerivedDestIp = (log) => !isUnknownLike(log?.derived?.destIp);
+const hasDerivedSrcIp = (log) => !isUnknownLike(log?.derived?.srcIp);
+const hasDerivedPort = (log) => {
+  const value = String(log?.derived?.destPort || "").trim();
+  return value && value !== "Unknown" && !value.startsWith("N/A");
+};
+
+const buildTelemetryCoverage = (logs) => {
+  const total = logs.length;
+  const withProtocol = logs.filter(hasDerivedProtocol).length;
+  const withDestination = logs.filter(hasDerivedDestIp).length;
+  const withPort = logs.filter(hasDerivedPort).length;
+
+  return {
+    total,
+    withProtocol,
+    withDestination,
+    withPort,
+    unknownProtocol: Math.max(0, total - withProtocol),
+    unknownDestination: Math.max(0, total - withDestination),
+    unknownPort: Math.max(0, total - withPort)
+  };
+};
 
 const averageMetric = (logs, accessor) => {
-  if (!logs.length) {
-    return 0;
-  }
+  if (!logs.length) return 0;
 
-  return Number((sumMetric(logs, accessor) / logs.length).toFixed(2));
+  const total = logs.reduce((sum, log) => sum + Number(accessor(log) || 0), 0);
+  return Number((total / logs.length).toFixed(2));
 };
 
-const buildDemoLogs = (orgId, count = 12) => {
+const buildTimelineBuckets = (logs) => {
+  const buckets = new Map();
   const now = Date.now();
 
-  return generateTrafficBatch(count).map((sample, index) => ({
-    message: `${sample.protocol} traffic sample on port ${sample.destinationPort}`,
-    level:
-      sample.severityHint === "Critical" || sample.severityHint === "High"
-        ? "warn"
-        : "info",
-    source: "simulator",
-    ip: sample.ip,
-    endpoint: sample.endpoint,
-    method: sample.method,
-    statusCode: sample.statusCode,
-    eventType: "request",
-    metadata: sample,
-    _org_id: orgId,
-    timestamp: new Date(now - index * 45 * 1000),
-  }));
-};
+  for (let index = TIME_WINDOW_HOURS - 1; index >= 0; index -= 1) {
+    const date = new Date(now - index * 60 * 60 * 1000);
+    const key = `${String(date.getHours()).padStart(2, "0")}:00`;
 
-const ensureDevelopmentTelemetry = async (orgId) => {
-  if (config.nodeEnv === "production" || !config.enableDemoTelemetry) {
-    return;
+    buckets.set(key, {
+      time: key,
+      events: 0,
+      priorityScore: 0,
+      criticalEvents: 0,
+      highEvents: 0,
+      anomalies: 0
+    });
   }
 
-  const recentTelemetryCount = await Log.countDocuments({
-    _org_id: orgId,
-    source: { $in: TELEMETRY_SOURCES },
-    timestamp: {
-      $gte: new Date(Date.now() - DEMO_ACTIVITY_WINDOW_MINUTES * 60 * 1000),
-    },
+  logs.forEach((log) => {
+    if (!log.timestamp) return;
+
+    const date = new Date(log.timestamp);
+    if (Number.isNaN(date.getTime())) return;
+
+    const key = `${String(date.getHours()).padStart(2, "0")}:00`;
+    if (!buckets.has(key)) return;
+
+    const bucket = buckets.get(key);
+    const priority = getPriority(log);
+    const severity = normalizeText(log?.severity).toLowerCase();
+    const isAnomaly = Boolean(log?.metadata?.idsEngine?.is_anomaly);
+
+    bucket.events += 1;
+    bucket.priorityScore += priority;
+
+    if (severity === "critical" || priority === 1) {
+      bucket.criticalEvents += 1;
+    }
+
+    if (severity === "high" || priority === 2) {
+      bucket.highEvents += 1;
+    }
+
+    if (isAnomaly) {
+      bucket.anomalies += 1;
+    }
   });
 
-  if (recentTelemetryCount > 0) {
-    return;
-  }
+  return [...buckets.values()];
+};
 
-  const seededLogs = await Log.insertMany(buildDemoLogs(orgId, 10));
+const normalizeIdsEngineHealth = (idsEngine) => {
+  const raw = idsEngine || {};
+  const status = normalizeText(raw?.status || raw?.state || raw?.health || raw);
 
-  for (const log of seededLogs) {
-    await evaluateLog(log);
-  }
+  return {
+    status: status ? status.toLowerCase() : "unknown",
+    modelLoaded:
+      raw?.modelLoaded ??
+      raw?.model_loaded ??
+      raw?.isModelLoaded ??
+      null,
+    usingFallback:
+      raw?.usingFallback ??
+      raw?.using_fallback ??
+      raw?.fallback ??
+      null,
+    version: raw?.version || null,
+    message: raw?.message || null
+  };
 };
 
 const getStats = async (req, res) => {
   try {
-    await ensureDevelopmentTelemetry(req.orgId);
-
-    // CRITICAL: Filter all statistics by organization to prevent cross-org data leakage
     const orgFilter = { _org_id: req.orgId };
-    const telemetryFilter = {
+    const recentWindow = {
+      $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000)
+    };
+
+    const liveSnortFilter = {
       ...orgFilter,
-      source: { $in: TELEMETRY_SOURCES },
+      ...buildSnortLogMatch()
     };
-    const recentLogFilter = {
-      ...telemetryFilter,
-      timestamp: { $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000) }
+
+    const telemetryLogFilter = {
+      ...orgFilter,
+      ...buildTelemetryLogMatch()
     };
+
+    const alertFilter = {
+      ...orgFilter,
+      source: { $in: DETECTION_ALERT_SOURCES }
+    };
+
+    const recentSnortFilter = {
+      ...liveSnortFilter,
+      timestamp: recentWindow
+    };
+
+    const recentTelemetryFilter = {
+      ...telemetryLogFilter,
+      timestamp: recentWindow
+    };
+
     const recentAlertFilter = {
-      ...orgFilter,
-      timestamp: { $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000) }
+      ...alertFilter,
+      timestamp: recentWindow
     };
 
     const [
@@ -142,121 +323,212 @@ const getStats = async (req, res) => {
       highAlerts,
       mediumAlerts,
       lowAlerts,
-      totalLogs,
+      totalTelemetryLogs,
+      totalLiveSnortLogs,
       latestAlert,
-      recentLogs,
+      recentTelemetryLogsRaw,
+      recentSnortLogsRaw,
       recentAlerts
     ] = await Promise.all([
-      Alert.countDocuments(orgFilter),
-      Alert.countDocuments({ ...orgFilter, severity: "Critical" }),
-      Alert.countDocuments({ ...orgFilter, severity: "High" }),
-      Alert.countDocuments({ ...orgFilter, severity: "Medium" }),
-      Alert.countDocuments({ ...orgFilter, severity: "Low" }),
-      Log.countDocuments(telemetryFilter),
-      Alert.findOne(orgFilter).sort({ timestamp: -1 }),
-      Log.find(recentLogFilter).sort({ timestamp: -1 }).limit(500),
+      Alert.countDocuments(recentAlertFilter),
+      Alert.countDocuments({ ...recentAlertFilter, severity: "Critical" }),
+      Alert.countDocuments({ ...recentAlertFilter, severity: "High" }),
+      Alert.countDocuments({ ...recentAlertFilter, severity: "Medium" }),
+      Alert.countDocuments({ ...recentAlertFilter, severity: "Low" }),
+      Log.countDocuments(telemetryLogFilter),
+      Log.countDocuments(liveSnortFilter),
+      Alert.findOne(recentAlertFilter).sort({ timestamp: -1 }),
+      Log.find(recentTelemetryFilter).sort({ timestamp: -1 }).limit(500),
+      Log.find(recentSnortFilter).sort({ timestamp: -1 }).limit(500),
       Alert.find(recentAlertFilter).sort({ timestamp: -1 }).limit(200)
     ]);
 
+    const recentTelemetryLogs = recentTelemetryLogsRaw.map(normalizeLog);
+    const recentSnortLogs = recentSnortLogsRaw.map(normalizeLog);
+    const recentMlLogs = recentTelemetryLogs.filter((log) =>
+      Boolean(log?.metadata?.idsEngine?.is_anomaly)
+    );
+    const telemetryCoverage = buildTelemetryCoverage(recentTelemetryLogs);
+
     const protocolDistribution = groupCounts(
-      recentLogs,
-      (log) => log.metadata?.protocol || log.metadata?.appProtocol || log.metadata?.transport
+      recentTelemetryLogs.filter(hasDerivedProtocol),
+      (log) => log?.derived?.protocol
     );
 
     const topPorts = groupCounts(
-      recentLogs,
-      (log) => String(log.metadata?.destinationPort || log.metadata?.port || log.endpoint || "unknown")
-    );
-
-    const sourceCountries = groupCounts(
-      recentLogs,
-      (log) => log.metadata?.sourceCountry
-    );
-
-    const destinationCountries = groupCounts(
-      recentLogs,
-      (log) => log.metadata?.destinationCountry
+      recentTelemetryLogs.filter(hasDerivedPort),
+      (log) => log?.derived?.destPort
     );
 
     const topAttackTypes = groupCounts(
       recentAlerts,
-      (alert) => alert.attackType || alert.type
+      (item) => item?.attackType || item?.type || item?.derived?.message || item?.message,
+      8
     );
 
     const topSourceIps = groupCounts(
-      recentLogs,
-      (log) => log.ip
+      recentTelemetryLogs.filter(hasDerivedSrcIp),
+      (log) => log?.derived?.srcIp,
+      8
     );
 
-    const timeline = buildTimelineBuckets(recentLogs);
-    const totalBytes = sumMetric(recentLogs, (log) => log.metadata?.bytes);
-    const avgDuration = averageMetric(recentLogs, (log) => log.metadata?.duration);
-    const avgRequestRate = averageMetric(recentLogs, (log) => log.metadata?.requestRate);
-    const totalFailedAttempts = sumMetric(recentLogs, (log) => log.metadata?.failedAttempts);
-    const avgFlowCount = averageMetric(recentLogs, (log) => log.metadata?.flowCount);
-
-    const protocolTotals = protocolDistribution.reduce(
-      (total, item) => total + item.value,
-      0
+    const topDestinationIps = groupCounts(
+      recentTelemetryLogs.filter(hasDerivedDestIp),
+      (log) => log?.derived?.destIp,
+      8
     );
+
+    const classifications = groupCounts(
+      recentAlerts,
+      (item) =>
+        item?.attackType ||
+        item?.type ||
+        item?.metadata?.classification ||
+        item?.derived?.classification,
+      8
+    );
+
+    const alertSourceDistribution = groupCounts(
+      recentAlerts,
+      (alert) => alert?.source || "unknown"
+    );
+
+    const alertStatusDistribution = groupCounts(
+      recentAlerts,
+      (alert) => alert?.status || "New"
+    );
+
+    const severityDistribution = groupCounts(
+      recentAlerts,
+      (alert) => alert?.severity || "Unknown"
+    );
+
+    const uniqueSourceIps = new Set(
+      recentTelemetryLogs.map((log) => log?.derived?.srcIp).filter((value) => !isUnknownLike(value))
+    ).size;
+
+    const uniqueDestinationIps = new Set(
+      recentTelemetryLogs
+        .map((log) => log?.derived?.destIp)
+        .filter((value) => !isUnknownLike(value))
+    ).size;
 
     return res.json({
+      mode:
+        recentTelemetryLogs.length > 0 || recentAlerts.length > 0
+          ? "live-monitoring"
+          : "waiting-for-telemetry",
       alerts: {
         total: totalAlerts,
         critical: criticalAlerts,
         high: highAlerts,
         medium: mediumAlerts,
-        low: lowAlerts
+        low: lowAlerts,
+        sourceDistribution: alertSourceDistribution,
+        statusDistribution: alertStatusDistribution,
+        severityDistribution
       },
-      logs: { total: totalLogs },
+      logs: {
+        total: totalTelemetryLogs,
+        snortTotal: totalLiveSnortLogs
+      },
       traffic: {
-        totalBytes,
-        avgDuration,
-        avgRequestRate,
-        totalFailedAttempts,
-        avgFlowCount,
-        eventsLast24h: recentLogs.length,
-        protocolTotals
+        eventsLast24h: recentTelemetryLogs.length,
+        uniqueSourceIps,
+        uniqueDestinationIps,
+        avgPriority: averageMetric(recentTelemetryLogs, (log) => log?.derived?.priority),
+        liveSnortEventsLast24h: recentSnortLogs.length,
+        liveSnortAlertsLast24h: recentAlerts.filter((alert) => alert.source === "snort").length,
+        mlAnomaliesLast24h: recentMlLogs.length,
+        telemetryCoverage
       },
       analytics: {
         protocolDistribution,
         topPorts,
         topAttackTypes,
-        sourceCountries,
-        destinationCountries,
+        classifications,
+        alertSourceDistribution,
+        alertStatusDistribution,
+        severityDistribution,
         topSourceIps,
-        timeline,
-        recentLogs: recentLogs.slice(0, 8)
+        topDestinationIps,
+        timeline: buildTimelineBuckets(recentTelemetryLogs),
+        recentLogs: recentTelemetryLogs.slice(0, 12),
+        recentAlerts: recentAlerts.slice(0, 8)
       },
-      lastDetectionTime: latestAlert?.timestamp || null
+      lastDetectionTime:
+        latestAlert?.timestamp ||
+        recentTelemetryLogs?.[0]?.timestamp ||
+        null
     });
   } catch (error) {
+    console.error("dashboard getStats error:", error);
     return res.status(500).json({ message: "Failed to fetch stats" });
   }
 };
 
 const getHealth = async (req, res) => {
   try {
+    const orgFilter = { _org_id: req.orgId };
     const dbStatus = mongoose.connection.readyState === 1 ? "connected" : "disconnected";
-    let idsStatus = "unknown";
 
-    try {
-      const response = await axios.get(`${config.idsEngineUrl}/health`, { timeout: 3000 });
-      idsStatus = response.data?.status === "ok" ? "online" : "degraded";
-    } catch (error) {
-      idsStatus = "offline";
-    }
+    const idsEngineRaw = await getIdsEngineHealth();
+    const idsEngine = normalizeIdsEngineHealth(idsEngineRaw);
 
-    // CRITICAL: Last alert query must be filtered by organization
-    const lastAlert = await Alert.findOne({ _org_id: req.orgId }).sort({ timestamp: -1 });
+    const liveSnortFilter = {
+      ...orgFilter,
+      ...buildSnortLogMatch()
+    };
+
+    const [
+      lastAlert,
+      lastSnortEvent,
+      liveSnortEventsLast24h,
+      liveSnortEventsRecent,
+      recentOnlineAssets
+    ] = await Promise.all([
+      Alert.findOne(orgFilter).sort({ timestamp: -1 }),
+      Log.findOne(liveSnortFilter).sort({ timestamp: -1 }),
+      Log.countDocuments({
+        ...liveSnortFilter,
+        timestamp: { $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000) }
+      }),
+      Log.countDocuments({
+        ...liveSnortFilter,
+        timestamp: { $gte: new Date(Date.now() - LIVE_STATUS_WINDOW_MINS * 60 * 1000) }
+      }),
+      Asset.countDocuments({
+        ...orgFilter,
+        agent_status: "online",
+        agent_last_seen: { $gte: new Date(Date.now() - AGENT_STATUS_WINDOW_MINS * 60 * 1000) }
+      })
+    ]);
+
+    const snortStatus =
+      liveSnortEventsRecent > 0 || recentOnlineAssets > 0 || liveSnortEventsLast24h > 0
+        ? "online"
+        : "offline";
 
     return res.json({
       status: "ok",
       database: dbStatus,
-      idsEngine: idsStatus,
-      lastDetectionTime: lastAlert?.timestamp || null
+      idsEngine: {
+        status: idsEngine.status,
+        modelLoaded: idsEngine.modelLoaded,
+        usingFallback: idsEngine.usingFallback,
+        version: idsEngine.version,
+        message: idsEngine.message
+      },
+      snort: {
+        status: snortStatus,
+        lastEventAt: lastSnortEvent?.timestamp || null,
+        liveEventsLast24h: liveSnortEventsLast24h,
+        recentOnlineAssets
+      },
+      lastDetectionTime: lastAlert?.timestamp || lastSnortEvent?.timestamp || null
     });
   } catch (error) {
+    console.error("dashboard getHealth error:", error);
     return res.status(500).json({ message: "Failed to fetch health" });
   }
 };

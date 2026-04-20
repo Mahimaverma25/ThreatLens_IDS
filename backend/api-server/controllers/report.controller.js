@@ -67,16 +67,27 @@ const exportLogsCsv = async (req, res) => {
   const filter = { _org_id: req.orgId };
 
   const logs = await Log.find(filter).sort({ timestamp: -1 }).limit(1000);
+  // Export all relevant columns for consistency with logs table
   const csv = buildCsv(
-    ["message", "ip", "protocol", "bytes", "destination_port", "request_rate", "timestamp"],
+    [
+      "Signature",
+      "Classification",
+      "Priority",
+      "Protocol",
+      "Source IP",
+      "Destination IP",
+      "Dest Port",
+      "Timestamp"
+    ],
     logs.map((log) => [
-      log.message,
-      log.ip,
-      log.metadata?.protocol || "",
-      log.metadata?.bytes || 0,
-      log.metadata?.destinationPort || log.metadata?.port || "",
-      log.metadata?.requestRate || 0,
-      log.timestamp,
+      log.metadata?.snort?.signatureId || log.metadata?.signature || "-",
+      log.metadata?.snort?.classification || log.metadata?.classification || "-",
+      log.metadata?.snort?.priority || log.metadata?.priority || "-",
+      log.metadata?.snort?.protocol || log.metadata?.protocol || log.protocol || "-",
+      log.metadata?.snort?.srcIp || log.ip || log.metadata?.sourceIp || "-",
+      log.metadata?.snort?.destIp || log.metadata?.destinationIp || "-",
+      log.metadata?.snort?.destPort || log.metadata?.destinationPort || log.metadata?.port || "-",
+      log.timestamp ? new Date(log.timestamp).toISOString() : "-"
     ])
   );
 

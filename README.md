@@ -1,354 +1,237 @@
-# ThreatLens - Intelligent Threat Detection & Response System
+# ThreatLens
 
-A comprehensive **IDS (Intrusion Detection System)** platform combining real-time network monitoring, ML-based anomaly detection, and a modern React dashboard for security event management.
+ThreatLens now runs a real live pipeline for Snort-driven detections:
 
----
+`Snort -> ThreatLens agent -> ThreatLens API -> MongoDB -> rule engine + Python ML -> alerts -> Socket.io -> React dashboard`
 
-## 🚀 Quick Start (5 minutes)
+## What Is Real Now
 
-### Prerequisites
-- Node.js 18+
-- MongoDB running
-- Python 3.8+ (for IDS engine)
+- `backend/agent/realtime-agent.js` is the active collector. It tails real Snort fast-alert or EVE JSON files and sends signed batches to the backend.
+- `backend/api-server/routes/log.routes.js` + `controllers/log.controller.js` is the only live ingest path.
+- `backend/ids-engine/app.py` exposes the Python IDS health and `/analyze` endpoint used by live ingestion.
+- MongoDB `Log` documents are created before detections run.
+- Node rule detections and Python ML detections both feed alerts in the live flow.
+- Socket.io updates are emitted per organization, so only the right dashboard gets live events.
 
-### 1. Start Backend API Server
-```bash
-cd backend/api-server
-npm install
-npm run dev  # Starts on http://localhost:5000
-```
+## What Is Demo-Only
 
-### 2. Start Agent (Event Collector)
-```bash
-cd backend/agent
-npm install
-npm run dev  # Starts collecting events
-```
+- `POST /api/logs/simulate`
+- `POST /api/alerts/scan`
+- `backend/ids-engine /scan`
 
-### 3. Start Frontend Dashboard
-```bash
-cd frontend
-npm install
-npm start  # Starts on http://localhost:3000
-```
+These are disabled by default with `ALLOW_SYNTHETIC_TRAFFIC=false` and `IDS_ENGINE_ENABLE_DEMO_SCAN=false`.
 
-### 4. Start IDS Engine (Python)
-```bash
-cd backend/ids-engine
-pip install -r requirements.txt
-python app.py  # Starts on http://localhost:8000
-```
+## Project Layout
 
-Or use the batch script:
-```bash
-./START_ALL.bat  # Launches all components
-```
-
----
-
-## 📋 Project Structure
-
-```
+```text
 ThreatLens/
-├── backend/
-│   ├── api-server/          # Express.js REST API & WebSocket  
-│   │   ├── controllers/     # Business logic
-│   │   ├── middleware/      # Auth, validation, rate limiting
-│   │   ├── models/          # MongoDB schemas
-│   │   ├── routes/          # API endpoints
-│   │   ├── services/        # Core services
-│   │   └── utils/           # Helpers & utilities
-│   ├── agent/               # Event collection agent
-│   │   ├── services/        # API client, event collection
-│   │   └── agent.js         # Main agent entry point
-│   └── ids-engine/          # Python IDS anomaly detection
-│       ├── detector/        # Detection rules & ML models
-│       ├── api/            # Flask API routes
-│       └── models/         # ML model loading
-├── frontend/                # React.js dashboard
-│   ├── src/
-│   │   ├── components/      # Reusable UI components
-│   │   ├── pages/          # Page components
-│   │   ├── services/       # API client
-│   │   ├── context/        # Auth context
-│   │   └── hooks/          # Custom hooks
-│   └── public/             # Static assets
-└── Documentation/          # Setup guides & deployment info
+  backend/
+    agent/        Node collector for live Snort files
+    api-server/   Express API, MongoDB models, Socket.io, rule engine
+    ids-engine/   Flask IDS service, IsolationForest model, training script
+  frontend/       React live dashboard
 ```
 
----
+## Prerequisites
 
-## 🔐 Authentication & Security
+- Node.js 18+
+- Python 3.10+
+- MongoDB running locally or reachable remotely
+- Snort writing either:
+  - fast alert output, or
+  - EVE/JSON alert output
 
-### API Authentication (Agent → Backend)
-The agent uses **API Key + HMAC-SHA256** signature authentication:
+## Recommended Start Order
 
-1. **Headers Required**:
-   - `X-API-Key`: Token for authentication
-   - `X-Timestamp`: Unix seconds timestamp
-   - `X-Signature`: HMAC-SHA256(payloadHash.timestamp, secret)
-   - `X-Asset-ID`: Device/server identifier
+### 1. Backend API
 
-2. **Setup API Key**:
-   ```bash
-   cd backend/api-server
-   node setup-dev-keys.js  # Creates test org, asset, and API key
-   ```
-   
-   Then update `backend/agent/.env`:
-   ```env
-   THREATLENS_API_URL=http://localhost:5000
-   THREATLENS_API_KEY=<token-from-setup-script>
-   THREATLENS_API_SECRET=tlk_secret_dev
-   ASSET_ID=agent-001
-   ```
+```powershell
+cd backend\api-server
+copy .env.example .env
+npm install
+npm start
+```
 
-### User Authentication (Dashboard)
-- **JWT tokens** for user login/logout
-- **Refresh tokens** for session management
-- **Organization isolation** - Users can only see their org's data
+### 2. Create Agent Credentials
 
----
-
-## ⚠️ Common Issues & Fixes
-
-### 1. Agent Gets 401 "Invalid API Key"
-**Fix**: Run the setup script to create valid API key in MongoDB:
-```bash
-cd backend/api-server
+```powershell
+cd backend\api-server
 node setup-dev-keys.js
 ```
-See: [FIX_401_INVALID_API_KEY.md](FIX_401_INVALID_API_KEY.md)
 
-### 2. Frontend Can't Connect to Backend
-**Issue**: Frontend proxy pointing to wrong port
-**Fix**: Ensure `frontend/package.json` has `"proxy": "http://localhost:5000"`
+This creates or reuses:
 
-### 3. MongoDB Connection Failed
-**Fix**: Ensure MongoDB is running and MONGO_URI in `.env` is correct:
-```bash
-# Check MongoDB
-mongod --version
+- an organization
+- an asset
+- an API key token
+- an API secret
 
-# Or use Docker
-docker run -d -p 27017:27017 mongo:latest
+It also syncs the agent `.env` file with the generated token and secret.
+
+### 3. Python IDS Engine
+
+```powershell
+cd backend\ids-engine
+pip install -r requirements.txt
+python train_model.py
+python app.py
 ```
 
----
+Optional shared backend/IDS integration key:
 
-## 📚 Detailed Guides
+`backend/api-server/.env`
 
-| Guide | Purpose |
-|-------|---------|
-| [QUICK_START.md](QUICK_START.md) | Step-by-step setup for all components |
-| [ARCHITECTURE_AND_DESIGN.md](ARCHITECTURE_AND_DESIGN.md) | System architecture & tech stack |
-| [FIX_401_INVALID_API_KEY.md](FIX_401_INVALID_API_KEY.md) | **Setup agent & resolve 401 errors** |
-| [BACKEND_FIXES_REPORT.md](BACKEND_FIXES_REPORT.md) | Backend improvements & fixes |
-| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Production deployment steps |
-
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-- **React 19** - UI framework
-- **Axios** - HTTP client
-- **Socket.io-client** - Real-time updates
-- **React Router v6** - Routing
-
-### Backend (Node.js/Express)
-- **Express.js** - REST API & WebSocket server
-- **MongoDB** - Database
-- **JWT + API Keys** - Authentication
-- **Winston** - Logging
-- **Helmet** - Security headers
-- **Express Rate Limit** - DDoS protection
-
-### IDS Engine (Python)
-- **Flask** - REST API
-- **Scikit-learn** - ML anomaly detection
-- **NumPy/Pandas** - Data processing
-- **Snort Integration** - Rule-based detection
-
----
-
-## 🧪 Testing
-
-### Run Tests
-```bash
-# Frontend tests
-cd frontend && npm test
-
-# Backend tests (if configured)
-cd backend/api-server && npm test
-
-# Agent tests
-cd backend/agent && npm test
-```
-
-### Manual Testing
-```bash
-# Test API endpoint
-curl -X GET http://localhost:5000/api/dashboard/stats \
-  -H "Authorization: Bearer <jwt-token>"
-
-# Check agent connection
-tail -f backend/agent/agent-combined.log
-```
-
----
-
-## 📋 Environment Variables
-
-Create `.env` files in each directory:
-
-**backend/api-server/.env**:
 ```env
-MONGO_URI=mongodb://localhost:27017/threatLens
-JWT_SECRET=your-jwt-secret-key
-JWT_EXPIRY=7d
-PORT=5000
-NODE_ENV=development
+INTEGRATION_API_KEY=shared-secret
 ```
 
-**backend/agent/.env**:
+`backend/ids-engine/.env` or shell env:
+
+```env
+IDS_ENGINE_API_KEY=shared-secret
+```
+
+### 4. ThreatLens Agent
+
+Edit `backend/agent/.env` so the Snort file paths point at the host running Snort:
+
 ```env
 THREATLENS_API_URL=http://localhost:5000
-THREATLENS_API_KEY=<from-setup-script>
-THREATLENS_API_SECRET=tlk_secret_dev
+THREATLENS_API_KEY=<generated-token>
+THREATLENS_API_SECRET=<generated-secret>
 ASSET_ID=agent-001
-BATCH_SIZE=50
-LOG_LEVEL=info
+AGENT_MODE=snort
+SNORT_FAST_LOG_PATH=C:\snort\log\alert_fast.txt
+SNORT_EVE_JSON_PATH=C:\snort\log\eve.json
 ```
 
-**frontend/.env** (optional):
-```env
-REACT_APP_API_URL=http://localhost:5000/api
+Then start it:
+
+```powershell
+cd backend\agent
+npm install
+npm start
 ```
 
----
+### 5. Frontend
 
-## 🚀 Production Deployment
-
-1. **Build Frontend**:
-   ```bash
-   cd frontend && npm run build
-   ```
-
-2. **Deploy Backend**:
-   - Use Node process manager (PM2, systemd, etc.)
-   - Set `NODE_ENV=production`
-   - Enable HTTPS
-   - Use strong JWT/API secrets
-
-3. **Database**:
-   - MongoDB Atlas or self-hosted
-   - Enable authentication
-   - Set IP whitelist
-
-4. **IDS Engine**:
-   - Deploy as separate service
-   - Use Gunicorn/uWSGI for production
-
-See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed steps.
-
----
-
-## 📊 API Endpoints
-
-### Authentication
-- `POST /api/auth/register` - Create account
-- `POST /api/auth/login` - User login
-- `POST /api/auth/refresh` - Refresh JWT token
-- `POST /api/auth/logout` - Logout
-
-### Logs & Events
-- `POST /api/logs/ingest` - Agent submits events (requires API Key)
-- `GET /api/logs` - Get logs (requires JWT)
-- `POST /api/alerts` - Create alert rule
-
-### Dashboard
-- `GET /api/dashboard/stats` - System statistics
-- `GET /api/dashboard/health` - Health check
-
-### Admin
-- `POST /api/admin/api-keys` - Create API key
-- `GET /api/admin/api-keys` - List API keys
-
----
-
-## 🔗 Debugging & Support
-
-### Check Logs
-```bash
-# Backend logs
-tail -f backend/api-server/logs/app.log
-
-# Agent logs
-tail -f backend/agent/agent-combined.log
-
-# Frontend console
-Browser DevTools → Console
+```powershell
+cd frontend
+npm install
+npm start
 ```
 
-### Enable Debug Mode
-```bash
-# Backend
-DEBUG=* npm run dev
+## Live Flow Notes
 
-# Agent
-LOG_LEVEL=debug node agent.js
+- The agent now signs requests with an HMAC derived from the API secret and does not send the raw secret in every request.
+- The backend assigns a stable `eventId` fingerprint to each log, so retries and overlapping Snort outputs do not create duplicate documents.
+- The backend stores logs first, then runs:
+  - local rule detections in Node
+  - ML anomaly analysis in Python
+- ML results are written back into `log.metadata.idsEngine`.
+- New logs and alerts are emitted to organization-scoped Socket.io rooms.
+
+## Multi-Signature Snort Testing
+
+If your dashboard only shows one signature, Snort is usually firing the same rule repeatedly.
+
+To generate multiple real signatures for ThreatLens, load the bundled test rules:
+
+- [snort/threatlens-local.rules](/D:/Major%20Project/ThreatLens/snort/threatlens-local.rules)
+- [snort/MULTI_SIGNATURE_TESTING.md](/D:/Major%20Project/ThreatLens/snort/MULTI_SIGNATURE_TESTING.md)
+
+## ML Pipeline
+
+- Training script: `backend/ids-engine/train_model.py`
+- Model artifact: `backend/ids-engine/models/attack_model.pkl`
+- Algorithm: `IsolationForest`
+- Fallback: if the model cannot be loaded, the IDS service uses a heuristic scorer instead of failing the ingest path
+
+Train from synthetic baseline data:
+
+```powershell
+cd backend\ids-engine
+python train_model.py
 ```
 
-### Common Commands
-```bash
-# Clear node_modules and reinstall
-rm -r node_modules && npm install
+Train from your own dataset:
 
-# Reset MongoDB (caution!)
-mongo threatLens --eval "db.dropDatabase()"
-
-# Check if ports are in use
-netstat -ano | findstr :3000  # Windows
-lsof -i:3000  # macOS/Linux
+```powershell
+python train_model.py --input path\to\training-data.jsonl
 ```
 
----
+Accepted input formats:
 
-## 📝 Project Status
+- `.json`
+- `.jsonl`
+- `.ndjson`
+- `.csv`
 
-✅ **Completed**
-- Core API server with authentication
-- Agent event collection & HMAC signing
-- MongoDB integration
-- REST endpoints for alerts
-- Real-time WebSocket updates
-- Python IDS detection engine
-- React dashboard
+## Troubleshooting
 
-🔄 **In Progress**
-- Advanced ML models
-- Custom rule builder UI
-- Export/reporting features
+### Snort data is not reaching the dashboard
 
----
+Check these in order:
 
-## 📄 License
+1. Confirm Snort is actually writing new lines to the configured file.
+2. Confirm the agent log says it is watching the correct file path.
+3. Confirm the agent log shows `Submit success`.
+4. Confirm MongoDB is receiving `Log` documents with `source=snort`.
+5. Confirm `/api/dashboard/health` shows `snort.status=online`.
 
-MIT License - See LICENSE file
+### Agent gets `401 Invalid request signature`
 
----
+- Re-run `node setup-dev-keys.js`
+- Make sure the backend and agent use the same token/secret pair
+- Make sure the agent and backend clocks are reasonably in sync
 
-## 👥 Contributors
+### Snort is writing both fast alerts and EVE JSON
 
-ThreatLens Development Team
+That is supported. ThreatLens fingerprints each normalized event so duplicate inserts from retries or mirrored outputs are suppressed.
 
----
+### Python IDS looks offline
 
-## ❓ Questions?
+Check:
 
-- Check [QUICK_START.md](QUICK_START.md) for setup help
-- Review [FIX_401_INVALID_API_KEY.md](FIX_401_INVALID_API_KEY.md) for authentication issues
-- See [BACKEND_FIXES_REPORT.md](BACKEND_FIXES_REPORT.md) for technical details
+```powershell
+cd backend\ids-engine
+python app.py
+```
 
-**Last Updated**: March 28, 2026
+Then open:
+
+- `http://localhost:8000/health`
+
+### Frontend does not live-update
+
+Check:
+
+- access token is present after login
+- backend is running on the same URL the frontend expects
+- Socket.io connection is not blocked by CORS
+- `/api/dashboard/health` returns the organization’s live Snort status
+
+## Useful Files
+
+- [README.md](D:/Major%20Project/ThreatLens/README.md)
+- [REALTIME_SNORT_SETUP.md](D:/Major%20Project/ThreatLens/REALTIME_SNORT_SETUP.md)
+- [backend/api-server/server.js](D:/Major%20Project/ThreatLens/backend/api-server/server.js)
+- [backend/agent/realtime-agent.js](D:/Major%20Project/ThreatLens/backend/agent/realtime-agent.js)
+- [backend/ids-engine/train_model.py](D:/Major%20Project/ThreatLens/backend/ids-engine/train_model.py)
+
+## Verification Commands
+
+```powershell
+cd backend\api-server
+node --check server.js
+
+cd ..\agent
+node --check realtime-agent.js
+
+cd ..\ids-engine
+python train_model.py
+
+cd ..\..\frontend
+$env:BUILD_PATH='build-live-verify'
+npm run build
+```

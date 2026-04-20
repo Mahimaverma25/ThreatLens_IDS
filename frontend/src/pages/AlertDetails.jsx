@@ -13,6 +13,8 @@ const formatBytes = (value) => {
   return `${bytes} B`;
 };
 
+const resolveSocketAlert = (payload) => payload?.data || payload;
+
 const AlertDetails = () => {
   const { id } = useParams();
   const { user } = useAuth();
@@ -63,7 +65,8 @@ const AlertDetails = () => {
 
   const socketHandlers = useMemo(
     () => ({
-      "alerts:update": (updated) => {
+      "alerts:update": (payload) => {
+        const updated = resolveSocketAlert(payload);
         if (updated?._id === id) {
           fetchAlert();
         }

@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import MainLayout from "../layout/MainLayout";
 import { alerts, dashboard, logs } from "../services/api";
 
+const normalizeStatus = (value) => {
+  const normalized = String(value || "unknown").toLowerCase();
+  return normalized === "ok" ? "online" : normalized;
+};
+
 const ModelHealth = () => {
   const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
@@ -19,7 +24,7 @@ const ModelHealth = () => {
           dashboard.health(),
           dashboard.stats(),
           alerts.list(120, 1),
-          logs.list(120, 1, { source: "ids-engine" })
+          logs.list(120, 1)
         ]);
         setHealth(healthResponse?.data ?? null);
         setStats(statsResponse?.data ?? null);
@@ -42,9 +47,26 @@ const ModelHealth = () => {
     return {
       falsePositives,
       falsePositiveRate: Math.round((falsePositives / totalAlerts) * 100),
-      idsEvents: logList.length
+      idsEvents: logList.filter((log) => Boolean(log.metadata?.idsEngine)).length,
+      modelStatus: normalizeStatus(health?.idsEngine?.status),
+      algorithm: health?.idsEngine?.algorithm || "Unavailable",
+      modelLoaded:
+        health?.idsEngine?.modelLoaded === null || health?.idsEngine?.modelLoaded === undefined
+          ? null
+          : Boolean(health?.idsEngine?.modelLoaded),
+      usingFallback:
+        health?.idsEngine?.usingFallback === null || health?.idsEngine?.usingFallback === undefined
+          ? null
+          : Boolean(health?.idsEngine?.usingFallback)
     };
-  }, [alertList, logList]);
+  }, [
+    alertList,
+    logList,
+    health?.idsEngine?.algorithm,
+    health?.idsEngine?.modelLoaded,
+    health?.idsEngine?.status,
+    health?.idsEngine?.usingFallback,
+  ]);
 
   if (loading) {
     return (
@@ -69,7 +91,7 @@ const ModelHealth = () => {
       <section className="metrics-grid">
         <div className="metric-card">
           <span>IDS Engine</span>
-          <strong>{health?.idsEngine || "unknown"}</strong>
+          <strong>{derived.modelStatus}</strong>
         </div>
         <div className="metric-card">
           <span>Database</span>
@@ -83,6 +105,10 @@ const ModelHealth = () => {
           <span>IDS Events</span>
           <strong>{derived.idsEvents}</strong>
         </div>
+        <div className="metric-card">
+          <span>Algorithm</span>
+          <strong>{derived.algorithm}</strong>
+        </div>
       </section>
 
       <div className="dashboard-grid">
@@ -93,6 +119,8 @@ const ModelHealth = () => {
           </div>
           <div className="panel-list">
             <div className="list-row"><span>Model Artifact</span><strong>attack_model.pkl</strong></div>
+            <div className="list-row"><span>Model Loaded</span><strong>{derived.modelLoaded === null ? "Unknown" : derived.modelLoaded ? "Yes" : "No"}</strong></div>
+            <div className="list-row"><span>Fallback Active</span><strong>{derived.usingFallback === null ? "Unknown" : derived.usingFallback ? "Yes" : "No"}</strong></div>
             <div className="list-row"><span>Last Detection</span><strong>{health?.lastDetectionTime ? new Date(health.lastDetectionTime).toLocaleString() : "No detections"}</strong></div>
             <div className="list-row"><span>Total Alerts</span><strong>{stats?.alerts?.total ?? 0}</strong></div>
             <div className="list-row"><span>24h Events</span><strong>{stats?.traffic?.eventsLast24h ?? 0}</strong></div>
@@ -108,7 +136,8 @@ const ModelHealth = () => {
             <div className="list-row"><span>False Positives</span><strong>{derived.falsePositives}</strong></div>
             <div className="list-row"><span>Critical Alerts</span><strong>{stats?.alerts?.critical ?? 0}</strong></div>
             <div className="list-row"><span>High Alerts</span><strong>{stats?.alerts?.high ?? 0}</strong></div>
-            <div className="list-row"><span>Avg Request Rate</span><strong>{Math.round(stats?.traffic?.avgRequestRate || 0)}/min</strong></div>
+            <div className="list-row"><span>Live Snort Events</span><strong>{stats?.traffic?.liveSnortEventsLast24h ?? 0}</strong></div>
+            <div className="list-row"><span>ML Anomalies</span><strong>{stats?.traffic?.mlAnomaliesLast24h ?? 0}</strong></div>
           </div>
         </div>
       </div>

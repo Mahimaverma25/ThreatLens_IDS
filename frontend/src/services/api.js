@@ -107,9 +107,7 @@ api.interceptors.response.use(
     const isAuthRoute =
       originalRequest.url?.includes("/auth/login") ||
       originalRequest.url?.includes("/auth/register") ||
-      originalRequest.url?.includes("/auth/refresh") ||
-      originalRequest.url?.includes("/auth/verify-email") ||
-      originalRequest.url?.includes("/auth/resend-verification");
+      originalRequest.url?.includes("/auth/refresh");
 
     /* ================= HANDLE 401 REFRESH ================= */
 
@@ -192,17 +190,6 @@ export const auth = {
   logout: () => api.post("/auth/logout"),
 
   me: () => api.get("/auth/me"),
-
-  verifyEmail: (email, token) =>
-    api.post("/auth/verify-email", {
-      email: email.trim(),
-      token: token.trim(),
-    }),
-
-  resendVerification: (email) =>
-    api.post("/auth/resend-verification", {
-      email: email.trim(),
-    }),
 };
 
 /* ================= ALERTS ================= */

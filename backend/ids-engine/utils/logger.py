@@ -3,7 +3,7 @@ import os
 
 
 def get_logger(name: str = "ids-engine") -> logging.Logger:
-	level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+	level_name = os.getenv("IDS_ENGINE_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO")).upper()
 	level = getattr(logging, level_name, logging.INFO)
 
 	logger = logging.getLogger(name)

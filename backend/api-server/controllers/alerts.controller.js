@@ -1,8 +1,8 @@
-const axios = require("axios");
 const Alert = require("../models/Alerts");
 const Log = require("../models/Log");
 const config = require("../config/env");
 const { createAlert, updateAlert } = require("../services/alert.service");
+const { requestIdsScan } = require("../services/detection.service");
 
 const severityToConfidence = {
 	Critical: 0.95,
@@ -115,12 +115,13 @@ const updateAlertStatus = async (req, res) => {
 
 const scanAndStore = async (req, res) => {
 	try {
-		const response = await axios.get(`${config.idsEngineUrl}/scan`, {
-			params: { samples: 12 },
-			timeout: 5000
-		});
+		if (!config.allowSyntheticTraffic) {
+			return res.status(403).json({
+				message: "Synthetic IDS scans are disabled. Use the live Snort agent for real-time alerts."
+			});
+		}
 
-		const alerts = Array.isArray(response.data) ? response.data : [];
+		const alerts = await requestIdsScan(12);
 		const stored = [];
 		for (const alert of alerts) {
 			// CRITICAL: Add _org_id to log and alert

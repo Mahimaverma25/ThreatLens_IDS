@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import "../styles/auth.css";
 
@@ -11,7 +11,6 @@ const Register = () => {
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
-  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -21,20 +20,11 @@ const Register = () => {
 
     try {
       const response = await register(email, password, username);
-      const emailAddress = response?.email || email.trim();
-      const message =
-        response?.message ||
-        "Registration successful. Check your email to verify your account.";
+      const message = response?.message || "Registration successful. You can sign in now.";
       setSuccess(message);
+      setEmail("");
+      setUsername("");
       setPassword("");
-      navigate(`/verify-email?email=${encodeURIComponent(emailAddress)}`, {
-        replace: true,
-        state: {
-          status: "success",
-          message,
-          previewUrl: response?.previewUrl || "",
-        },
-      });
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed");
     } finally {

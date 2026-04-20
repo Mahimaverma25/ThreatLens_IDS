@@ -5,16 +5,18 @@ const { normalizeRole } = require("./roles");
 
 const generateAccessToken = (user) =>
   jwt.sign(
-    { sub: user.id, role: normalizeRole(user.role), email: user.email },
+    {
+      sub: user.id,
+      role: normalizeRole(user.role),
+      email: user.email,
+      orgId: user._org_id?.toString?.() || user.orgId?.toString?.() || user.orgId || undefined,
+    },
     config.jwtSecret,
     { expiresIn: config.jwtExpiresIn }
   );
 
 const generateRefreshToken = () =>
   crypto.randomBytes(64).toString("hex");
-
-const generateVerificationToken = () =>
-  crypto.randomBytes(32).toString("hex");
 
 const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
@@ -31,7 +33,6 @@ const getRefreshTokenExpiry = () => {
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
-  generateVerificationToken,
   hashToken,
   getRefreshTokenExpiry
 };

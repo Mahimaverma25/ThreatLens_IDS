@@ -37,20 +37,14 @@ module.exports = {
 	refreshCookieDomain: process.env.REFRESH_COOKIE_DOMAIN || undefined,
 	refreshCookieSecure: process.env.REFRESH_COOKIE_SECURE === "true",
 	refreshCookieSameSite: process.env.REFRESH_COOKIE_SAMESITE || "lax",
-	emailVerificationExpiryMinutes: getNumber(process.env.EMAIL_VERIFICATION_EXPIRY_MINUTES, 30),
-	enableDemoTelemetry:
-		process.env.ENABLE_DEMO_TELEMETRY === undefined
-			? (process.env.NODE_ENV || "development") !== "production"
-			: process.env.ENABLE_DEMO_TELEMETRY === "true",
-	smtpHost: process.env.SMTP_HOST || "",
-	smtpPort: getNumber(process.env.SMTP_PORT, 587),
-	smtpSecure: process.env.SMTP_SECURE === "true",
-	smtpUser: process.env.SMTP_USER || "",
-	smtpPass: process.env.SMTP_PASS || "",
-	smtpFrom: process.env.SMTP_FROM || "ThreatLens <no-reply@threatlens.local>",
+	enableDemoTelemetry: process.env.ENABLE_DEMO_TELEMETRY === "true",
+	allowSyntheticTraffic: process.env.ALLOW_SYNTHETIC_TRAFFIC === "true",
+	enableIdsAnalysis: process.env.ENABLE_IDS_ANALYSIS !== "false",
 	integrationApiKey: process.env.INTEGRATION_API_KEY || "",
 	requestLogLevel: process.env.REQUEST_LOG_LEVEL || "info",
 	alertCorrelationWindowMins: getNumber(process.env.ALERT_CORRELATION_WINDOW_MINS, 10),
 	dosThresholdPerMinute: getNumber(process.env.DOS_THRESHOLD_PER_MINUTE, 150),
-	bruteforceThreshold: getNumber(process.env.BRUTE_FORCE_THRESHOLD, 5)
+	bruteforceThreshold: getNumber(process.env.BRUTE_FORCE_THRESHOLD, 5),
+	ingestBatchLimit: getNumber(process.env.INGEST_BATCH_LIMIT, 500),
+	ingestSignatureToleranceMs: getNumber(process.env.INGEST_SIGNATURE_TOLERANCE_MS, 5 * 60 * 1000)
 };
