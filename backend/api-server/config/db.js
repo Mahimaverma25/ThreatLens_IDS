@@ -1,27 +1,51 @@
 const mongoose = require("mongoose");
+
 const config = require("./env");
 
-const connectDB = async () => {
-  try {
-    await mongoose.connect(config.mongoUri, {
-      serverSelectionTimeoutMS: 5000,
-    });
-    console.log("✓ MongoDB connected successfully");
-    return mongoose.connection;
-  } catch (error) {
-    console.error("✗ MongoDB connection error:", error.message);
-    process.exit(1);
+let listenersAttached = false;
+
+const attachConnectionListeners = () => {
+  if (listenersAttached) {
+    return;
   }
+
+  listenersAttached = true;
+
+  mongoose.connection.on("connected", () => {
+    console.log("MongoDB connected");
+  });
+
+  mongoose.connection.on("error", (error) => {
+    console.error("MongoDB error:", error.message);
+  });
+
+  mongoose.connection.on("disconnected", () => {
+    console.warn("MongoDB disconnected");
+  });
+};
+
+const connectDB = async () => {
+  mongoose.set("strictQuery", true);
+  attachConnectionListeners();
+
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+
+  await mongoose.connect(config.mongoUri, {
+    serverSelectionTimeoutMS: 5000,
+  });
+
+  return mongoose.connection;
 };
 
 const disconnectDB = async () => {
-  try {
-    await mongoose.disconnect();
-    console.log("✓ MongoDB disconnected");
-  } catch (error) {
-    console.error("✗ MongoDB disconnection error:", error.message);
-    process.exit(1);
+  if (mongoose.connection.readyState === 0) {
+    return;
   }
+
+  await mongoose.disconnect();
+  console.log("MongoDB disconnected");
 };
 
 module.exports = { connectDB, disconnectDB };

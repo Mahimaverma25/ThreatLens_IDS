@@ -9,13 +9,21 @@ from typing import Iterable, List, Tuple
 import joblib
 import numpy as np
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
-from sklearn.metrics import classification_report, precision_recall_fscore_support
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    precision_recall_fscore_support,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import OneClassSVM
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "models" / "attack_model.pkl"
+DEFAULT_RF_OUTPUT = ROOT / "models" / "rf_model.pkl"
+DEFAULT_SVM_OUTPUT = ROOT / "models" / "svm_model.pkl"
 DEFAULT_INPUT = ROOT / "data" / "training_samples.csv"
 FEATURE_NAMES = [
     "protocol_code",
@@ -60,15 +68,26 @@ def normalize_training_record(record: dict) -> dict:
 
 
 def _record_label(record: dict):
+    for key in ("attack_type", "attack_class", "class_name", "label_name"):
+        raw = str(record.get(key, "")).strip()
+        if raw:
+            return raw.lower().replace(" ", "_")
+
     if "label" not in record:
         return None
     raw = str(record.get("label", "")).strip()
     if not raw:
         return None
     try:
-        return int(float(raw))
+        numeric = int(float(raw))
+        return "benign" if numeric == 0 else "malicious"
     except ValueError:
-        return 1 if raw.lower() in {"attack", "malicious", "anomaly", "true"} else 0
+        normalized = raw.lower().replace(" ", "_")
+        if normalized in {"0", "benign", "normal", "false"}:
+            return "benign"
+        if normalized in {"1", "attack", "malicious", "anomaly", "true"}:
+            return "malicious"
+        return normalized
 
 
 def generate_benign_sample() -> dict:
@@ -230,6 +249,25 @@ def build_synthetic_labeled_records(samples: int) -> Tuple[List[dict], List[int]
     return records, labels
 
 
+def augment_training_records(
+    records: List[dict], labels: List[str], minimum_samples: int
+) -> Tuple[List[dict], List[str]]:
+    if len(records) >= minimum_samples:
+        return records, labels
+
+    synthetic_records, synthetic_labels = build_synthetic_labeled_records(
+        max(minimum_samples - len(records), 0)
+    )
+    normalized_synthetic_labels = [
+        "benign" if int(label) == 0 else "malicious" for label in synthetic_labels
+    ]
+
+    return (
+        records + synthetic_records,
+        labels + normalized_synthetic_labels if labels else normalized_synthetic_labels,
+    )
+
+
 def load_json_lines(path: str) -> Iterable[dict]:
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
@@ -267,8 +305,10 @@ def load_training_records(path: str) -> Tuple[List[dict], List[int]]:
     records = [normalize_training_record(record) for record in rows]
     labels = [_record_label(record) for record in rows]
 
-    if any(label is not None for label in labels):
-        labels = [0 if label is None else int(label) for label in labels]
+    resolved_labels = [label for label in labels if label is not None]
+    if resolved_labels:
+        fallback_label = "benign" if "benign" in resolved_labels else resolved_labels[0]
+        labels = [label if label is not None else fallback_label for label in labels]
     else:
         labels = []
 
@@ -279,13 +319,18 @@ def build_training_matrix(records: List[dict]) -> np.ndarray:
     return np.array([[record.get(name, 0.0) for name in FEATURE_NAMES] for record in records], dtype=float)
 
 
-def train_supervised_model(matrix: np.ndarray, labels: List[int]):
+def train_supervised_model(matrix: np.ndarray, labels: List[str]):
+    label_names = np.array(labels)
+    class_names = sorted({label for label in label_names})
+    class_to_index = {label: index for index, label in enumerate(class_names)}
+    encoded_labels = np.array([class_to_index[label] for label in label_names], dtype=int)
+
     x_train, x_test, y_train, y_test = train_test_split(
         matrix,
-        np.array(labels, dtype=int),
+        encoded_labels,
         test_size=0.25,
         random_state=42,
-        stratify=np.array(labels, dtype=int),
+        stratify=encoded_labels,
     )
 
     model = RandomForestClassifier(
@@ -298,12 +343,18 @@ def train_supervised_model(matrix: np.ndarray, labels: List[int]):
     )
     model.fit(x_train, y_train)
 
-    probabilities = model.predict_proba(x_test)[:, 1]
+    probabilities = model.predict_proba(x_test)
+    max_probabilities = probabilities.max(axis=1)
+    predictions = model.predict(x_test)
     threshold = 0.55
-    predictions = (probabilities >= threshold).astype(int)
     precision, recall, f1, _ = precision_recall_fscore_support(
-        y_test, predictions, average="binary", zero_division=0
+        y_test, predictions, average="weighted", zero_division=0
     )
+    accuracy = accuracy_score(y_test, predictions)
+    matrix_output = confusion_matrix(y_test, predictions).tolist()
+    benign_indexes = [
+        index for index, name in enumerate(class_names) if name.lower() in {"benign", "normal"}
+    ]
 
     summary = {
         "samples": int(matrix.shape[0]),
@@ -312,17 +363,27 @@ def train_supervised_model(matrix: np.ndarray, labels: List[int]):
         "features": FEATURE_NAMES,
         "task": "classification",
         "threshold": threshold,
+        "accuracy": float(accuracy),
         "precision": float(precision),
         "recall": float(recall),
         "f1_score": float(f1),
+        "mean_prediction_confidence": float(np.mean(max_probabilities)),
+        "class_names": class_names,
+        "benign_indexes": benign_indexes,
         "class_balance": {
-            "benign": int((np.array(labels) == 0).sum()),
-            "malicious": int((np.array(labels) == 1).sum()),
+            name: int((label_names == name).sum()) for name in class_names
         },
-        "report": classification_report(y_test, predictions, zero_division=0),
+        "confusion_matrix": matrix_output,
+        "report": classification_report(
+            y_test,
+            predictions,
+            labels=list(range(len(class_names))),
+            target_names=class_names,
+            zero_division=0,
+        ),
     }
 
-    return model, threshold, "RandomForestClassifier", summary
+    return model, threshold, "RandomForestClassifier", summary, class_names, benign_indexes
 
 
 def train_anomaly_model(matrix: np.ndarray, contamination: float):
@@ -356,6 +417,34 @@ def train_anomaly_model(matrix: np.ndarray, contamination: float):
     return pipeline, threshold, "IsolationForest", summary
 
 
+def train_svm_anomaly_model(matrix: np.ndarray, gamma: str = "scale"):
+    scaler = StandardScaler()
+    scaled = scaler.fit_transform(matrix)
+    model = OneClassSVM(kernel="rbf", nu=0.08, gamma=gamma)
+    model.fit(scaled)
+
+    pipeline = Pipeline(
+        steps=[
+            ("scaler", scaler),
+            ("model", model),
+        ]
+    )
+
+    decision_values = -pipeline.decision_function(matrix)
+    probabilities = 1.0 / (1.0 + np.exp(-decision_values))
+    threshold = float(np.quantile(probabilities, 0.92))
+
+    summary = {
+        "samples": int(matrix.shape[0]),
+        "features": FEATURE_NAMES,
+        "task": "anomaly",
+        "score_mean": float(np.mean(probabilities)),
+        "score_stddev": float(np.std(probabilities)),
+    }
+
+    return pipeline, threshold, "OneClassSVM", summary
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train the ThreatLens attack model.")
     parser.add_argument("--input", help="Optional path to JSON/JSONL/CSV training data.")
@@ -363,6 +452,16 @@ def main():
         "--output",
         default=str(DEFAULT_OUTPUT),
         help="Path to write the trained model bundle.",
+    )
+    parser.add_argument(
+        "--rf-output",
+        default=str(DEFAULT_RF_OUTPUT),
+        help="Path to write the Random Forest model bundle.",
+    )
+    parser.add_argument(
+        "--svm-output",
+        default=str(DEFAULT_SVM_OUTPUT),
+        help="Path to write the SVM model bundle.",
     )
     parser.add_argument(
         "--samples",
@@ -386,40 +485,87 @@ def main():
     if input_path:
         records, labels = load_training_records(input_path)
     else:
-        records, labels = build_synthetic_labeled_records(max(args.samples, 600))
+        records, numeric_labels = build_synthetic_labeled_records(max(args.samples, 600))
+        labels = ["benign" if int(label) == 0 else "malicious" for label in numeric_labels]
 
     if not records:
         raise ValueError("No training records available")
 
+    minimum_samples = max(args.samples, 600)
+    records, labels = augment_training_records(records, labels, minimum_samples)
+
     matrix = build_training_matrix(records)
 
-    use_supervised = bool(labels) and len(set(labels)) > 1
-    if use_supervised:
-        model, threshold, algorithm, training_summary = train_supervised_model(matrix, labels)
-        task = "classification"
-    else:
-        model, threshold, algorithm, training_summary = train_anomaly_model(matrix, args.contamination)
-        task = "anomaly"
+    trained_at = datetime.now(timezone.utc).isoformat()
 
-    artifact = {
-        "model": model,
+    normalized_labels = [str(label) for label in labels] if labels else []
+    use_supervised = bool(normalized_labels) and len(set(normalized_labels)) > 1
+
+    if use_supervised:
+        rf_model, rf_threshold, rf_algorithm, rf_summary, class_names, benign_indexes = train_supervised_model(
+            matrix, normalized_labels
+        )
+        rf_artifact = {
+            "model": rf_model,
+            "feature_names": FEATURE_NAMES,
+            "threshold": rf_threshold,
+            "algorithm": rf_algorithm,
+            "task": "classification",
+            "trained_at": trained_at,
+            "training_summary": rf_summary,
+            "class_names": class_names,
+            "benign_indexes": benign_indexes,
+        }
+        rf_output_path = Path(args.rf_output)
+        rf_output_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(rf_artifact, rf_output_path)
+    else:
+        rf_artifact = None
+        rf_output_path = Path(args.rf_output)
+
+    svm_model, svm_threshold, svm_algorithm, svm_summary = train_svm_anomaly_model(matrix)
+    svm_artifact = {
+        "model": svm_model,
         "feature_names": FEATURE_NAMES,
-        "threshold": threshold,
-        "algorithm": algorithm,
-        "task": task,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "training_summary": training_summary,
+        "threshold": svm_threshold,
+        "algorithm": svm_algorithm,
+        "task": "anomaly",
+        "trained_at": trained_at,
+        "training_summary": svm_summary,
+    }
+    svm_output_path = Path(args.svm_output)
+    svm_output_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(svm_artifact, svm_output_path)
+
+    legacy_model, legacy_threshold, legacy_algorithm, legacy_summary = train_anomaly_model(
+        matrix, args.contamination
+    )
+    legacy_artifact = {
+        "model": legacy_model,
+        "feature_names": FEATURE_NAMES,
+        "threshold": legacy_threshold,
+        "algorithm": legacy_algorithm,
+        "task": "anomaly",
+        "trained_at": trained_at,
+        "training_summary": legacy_summary,
     }
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(artifact, output_path)
+    joblib.dump(legacy_artifact, output_path)
 
-    print(f"Model saved to {output_path}")
-    print(f"Algorithm: {artifact['algorithm']}")
-    print(f"Task: {artifact['task']}")
-    print(f"Samples: {training_summary['samples']}")
-    print(f"Threshold: {threshold:.4f}")
+    print(f"Legacy model saved to {output_path}")
+    print(f"SVM model saved to {svm_output_path}")
+    if rf_artifact:
+        print(f"Random Forest model saved to {rf_output_path}")
+    else:
+        print("Random Forest model skipped because labeled classes were not available")
+    print(f"Samples: {legacy_summary['samples']}")
+    print(f"Legacy threshold: {legacy_threshold:.4f}")
+    print(f"SVM threshold: {svm_threshold:.4f}")
+    if rf_artifact:
+        print(f"RF accuracy: {rf_summary['accuracy']:.4f}")
+        print(f"RF weighted F1: {rf_summary['f1_score']:.4f}")
 
 
 if __name__ == "__main__":

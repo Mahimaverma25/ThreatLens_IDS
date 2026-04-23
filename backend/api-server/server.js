@@ -13,15 +13,21 @@ const authenticate = require("./middleware/auth.middleware");
 const { orgIsolation } = require("./middleware/orgIsolation.middleware");
 const { apiLimiter, authLimiter } = require("./middleware/rateLimit");
 const requestLogger = require("./middleware/requestLogger");
-const { initSocket } = require("./socket");
+const { initEventStream } = require("./services/event-stream.service");
+const { initSocket } = require("./services/socket.service");
 
 const alertRoutes = require("./routes/alerts.routes");
+const agentsRoutes = require("./routes/agents.routes");
 const apikeyRoutes = require("./routes/apikey.routes");
 const assetRoutes = require("./routes/asset.routes");
 const authRoutes = require("./routes/auth.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
+const incidentsRoutes = require("./routes/incidents.routes");
+const intelRoutes = require("./routes/intel.routes");
 const logsRoutes = require("./routes/logs.routes");
+const playbooksRoutes = require("./routes/playbooks.routes");
 const reportRoutes = require("./routes/report.routes");
+const rulesRoutes = require("./routes/rules.routes");
 const userRoutes = require("./routes/user.routes");
 
 const app = express();
@@ -144,11 +150,16 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/agents", agentsRoutes);
 app.use("/api/logs", logsRoutes);
 
 app.use("/api/alerts", authenticate, orgIsolation, alertRoutes);
 app.use("/api/dashboard", authenticate, orgIsolation, dashboardRoutes);
+app.use("/api/intel", authenticate, orgIsolation, intelRoutes);
+app.use("/api/incidents", authenticate, orgIsolation, incidentsRoutes);
 app.use("/api/reports", authenticate, orgIsolation, reportRoutes);
+app.use("/api/playbooks", authenticate, orgIsolation, playbooksRoutes);
+app.use("/api/rules", authenticate, orgIsolation, rulesRoutes);
 app.use("/api/assets", authenticate, orgIsolation, assetRoutes);
 app.use("/api/admin/api-keys", authenticate, orgIsolation, apikeyRoutes);
 app.use("/api/users", authenticate, orgIsolation, userRoutes);
@@ -212,6 +223,7 @@ const tryListen = (port) =>
 const startServer = async () => {
   try {
     await connectDB();
+    const streamState = await initEventStream();
 
     let preferredPort = Number(config.port || process.env.PORT || 5001);
     let activePort = preferredPort;
@@ -225,6 +237,11 @@ const startServer = async () => {
         console.log(`Root: http://localhost:${activePort}/`);
         console.log(`Health: http://localhost:${activePort}/health`);
         console.log("Socket.IO initialized");
+        console.log(
+          `Event stream mode: ${streamState.mode}${
+            streamState.key ? ` (${streamState.key})` : ""
+          }`
+        );
         console.log(
           `Allowed CORS origins: ${
             allowedOrigins.length ? allowedOrigins.join(", ") : "ALL (dev fallback)"
@@ -296,5 +313,11 @@ process.on("unhandledRejection", async (reason) => {
   console.error("Unhandled Rejection:", reason);
   await shutdown("unhandledRejection");
 });
+
+module.exports = {
+  app,
+  server,
+  startServer,
+};
 
 startServer();

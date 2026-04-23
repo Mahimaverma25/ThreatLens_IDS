@@ -2,7 +2,14 @@ const { v4: uuidv4 } = require("uuid");
 
 const Alert = require("../models/Alerts");
 const config = require("../config/env");
-const { emitToOrganization } = require("../socket");
+const {
+  emitToOrganization,
+} = require("../socket");
+const { upsertIncidentFromAlert } = require("./incident.service");
+const {
+  emitDashboardUpdate,
+  emitNewAlert,
+} = require("./socket.service");
 
 const correlationWindowStart = () =>
   new Date(Date.now() - config.alertCorrelationWindowMins * 60 * 1000);
@@ -24,12 +31,28 @@ const createAlert = async (payload) => {
     ...payload,
   });
 
-  emitAlert("alerts:new", alert, "created");
+  await upsertIncidentFromAlert(alert);
+  emitNewAlert(alert._org_id, alert, {
+    type: "created",
+    source: alert.source || "rule-engine",
+    severity: alert.severity || "Unknown",
+  });
+  emitDashboardUpdate(alert._org_id, {
+    source: alert.source || "rule-engine",
+    mode: "alert-created",
+    lastAlert: alert,
+  });
   return alert;
 };
 
 const updateAlert = async (alert, meta = {}) => {
   emitAlert("alerts:update", alert, "updated", meta);
+  emitDashboardUpdate(alert._org_id, {
+    source: alert.source || "rule-engine",
+    mode: "alert-updated",
+    lastAlert: alert,
+    meta,
+  });
   return alert;
 };
 
@@ -107,7 +130,9 @@ const upsertCorrelatedAlert = async ({
     existing.metadata = mergeMetadata(existing.metadata || {}, metadata || {});
     existing.markModified("metadata");
     await existing.save();
-    return appendRelatedLogs(existing, relatedLogs);
+    const updated = await appendRelatedLogs(existing, relatedLogs);
+    await upsertIncidentFromAlert(updated);
+    return updated;
   }
 
   return createAlert({

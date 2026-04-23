@@ -27,6 +27,12 @@ const protocolCodes = {
 
 const mapProtocol = (value) => protocolCodes[String(value || "").toUpperCase()] || 0;
 // This allows detection and logging of more protocol/signature types
+const isIdsSensorLog = (log) =>
+  ["snort", "suricata"].includes(
+    String(log?.metadata?.sensorType || log?.source || "")
+      .trim()
+      .toLowerCase()
+  );
 
 const buildSampleFromLog = (log) => {
   const snort = log.metadata?.snort || {};
@@ -58,7 +64,7 @@ const buildSampleFromLog = (log) => {
     smb_writes: Number(log.metadata?.smbWrites || log.metadata?.smb_writes || 0),
     duration: Number(log.metadata?.duration || 0),
     snort_priority: Number(snort.priority || 0),
-    is_snort: log.source === "snort" ? 1 : 0,
+    is_snort: isIdsSensorLog(log) ? 1 : 0,
     timestamp: log.timestamp ? new Date(log.timestamp).toISOString() : new Date().toISOString(),
     metadata: {
       classification: snort.classification || "",
@@ -114,6 +120,9 @@ const getIdsEngineHealth = async () => {
           ? Boolean(modelInfo.using_fallback)
           : null,
       featureNames: Array.isArray(modelInfo?.feature_names) ? modelInfo.feature_names : [],
+      rfModel: modelInfo?.rf_model || null,
+      svmModel: modelInfo?.svm_model || null,
+      legacyModel: modelInfo?.legacy_model || null,
       error: modelInfo?.error || null,
       details: data,
     };
@@ -163,6 +172,7 @@ const applyIdsResults = async (logs, results = []) => {
               severity: result.analysis?.severity || null,
               using_fallback: Boolean(result.analysis?.using_fallback),
               reason: result.analysis?.reason || null,
+              submodels: result.analysis?.submodels || null,
             },
           },
         },
@@ -173,14 +183,12 @@ const applyIdsResults = async (logs, results = []) => {
       anomalyAlerts.push(
         createDetectionAlert({
           log,
-          attackType:
-            log.source === "snort"
-              ? "ML Anomalous Snort Activity"
-              : "ML Anomalous Network Activity",
-          type:
-            log.source === "snort"
-              ? "ML Anomalous Snort Activity"
-              : "ML Anomalous Network Activity",
+          attackType: isIdsSensorLog(log)
+            ? "ML Anomalous IDS Activity"
+            : "ML Anomalous Network Activity",
+          type: isIdsSensorLog(log)
+            ? "ML Anomalous IDS Activity"
+            : "ML Anomalous Network Activity",
           severity: result.analysis?.severity || "Medium",
           confidence: result.analysis?.confidence,
           risk_score: result.analysis?.risk_score,
@@ -191,6 +199,8 @@ const applyIdsResults = async (logs, results = []) => {
             score: result.analysis?.score ?? null,
             threshold: result.analysis?.threshold ?? null,
             using_fallback: Boolean(result.analysis?.using_fallback),
+            predictedClass:
+              result.analysis?.submodels?.random_forest?.predicted_class || null,
           },
         })
       );
@@ -246,23 +256,8 @@ const analyzeLogs = async (logs = []) => {
   }
 };
 
-const requestIdsScan = async (samples = 5) => {
-  const response = await axios.get(`${config.idsEngineUrl}/scan`, {
-    params: { samples },
-    timeout: IDS_TIMEOUT_MS,
-    headers: buildIdsHeaders(),
-  });
-
-  return Array.isArray(response.data?.data)
-    ? response.data.data
-    : Array.isArray(response.data)
-      ? response.data
-      : [];
-};
-
 module.exports = {
   analyzeLogs,
-  requestIdsScan,
   getIdsEngineHealth,
   buildSampleFromLog,
 };

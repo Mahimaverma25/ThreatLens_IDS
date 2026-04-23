@@ -54,6 +54,8 @@ const AssetSchema = new mongoose.Schema({
   geo_country: String,
 
   // Agent status
+  host_platform: String,
+  telemetry_types: [String],
   agent_version: String,
   agent_last_seen: Date,
   agent_status: {

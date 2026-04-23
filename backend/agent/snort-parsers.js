@@ -76,7 +76,6 @@ const buildSnortLog = ({
   timestamp,
   message,
   protocol,
-  appProtocol,
   srcAddress,
   dstAddress,
   classification,
@@ -84,17 +83,12 @@ const buildSnortLog = ({
   gid,
   sid,
   rev,
-  packets,
-  bytes,
-  flowCount,
-  flowId,
   raw,
 }) => {
   const normalizedPriority = normalizePriority(priority);
   const source = splitAddress(srcAddress);
   const destination = splitAddress(dstAddress);
 
-  // Support all protocol types, not just ICMP
   return {
     message,
     level: levelFromPriority(normalizedPriority),
@@ -103,13 +97,9 @@ const buildSnortLog = ({
     ip: source.ip || destination.ip || "",
     timestamp: parseTimestamp(timestamp),
     metadata: {
-      protocol: protocol || appProtocol || "UNKNOWN",
-      appProtocol: appProtocol || undefined,
+      protocol: protocol || "UNKNOWN",
       destinationPort: destination.port,
       port: destination.port,
-      packets: Number(packets || 0),
-      bytes: Number(bytes || 0),
-      flowCount: Number(flowCount || 0),
       snort: {
         generatorId: gid ? Number(gid) : null,
         signatureId: sid ? Number(sid) : null,
@@ -117,15 +107,12 @@ const buildSnortLog = ({
         message,
         classification: classification || "Unknown",
         priority: normalizedPriority,
-        protocol: protocol || appProtocol || "UNKNOWN",
+        protocol: protocol || "UNKNOWN",
         srcIp: source.ip || "",
         srcPort: source.port,
         destIp: destination.ip || "",
         destPort: destination.port,
-        flowId: flowId || null,
         raw,
-        // Add protocolType for clarity in logs
-        protocolType: (protocol || appProtocol || "UNKNOWN").toUpperCase(),
       },
     },
   };
@@ -174,7 +161,6 @@ const parseEveJsonLine = (line) => {
     timestamp: parsed.timestamp,
     message: parsed.alert.signature || "Snort Alert",
     protocol: parsed.proto,
-    appProtocol: parsed.app_proto,
     srcAddress: parsed.src_port ? `${parsed.src_ip}:${parsed.src_port}` : parsed.src_ip,
     dstAddress: parsed.dest_port ? `${parsed.dest_ip}:${parsed.dest_port}` : parsed.dest_ip,
     classification: parsed.alert.category,
@@ -182,12 +168,6 @@ const parseEveJsonLine = (line) => {
     gid: parsed.alert.gid,
     sid: parsed.alert.signature_id,
     rev: parsed.alert.rev,
-    packets:
-      Number(parsed.flow?.pkts_toclient || 0) + Number(parsed.flow?.pkts_toserver || 0),
-    bytes:
-      Number(parsed.flow?.bytes_toclient || 0) + Number(parsed.flow?.bytes_toserver || 0),
-    flowCount: 1,
-    flowId: parsed.flow_id || null,
     raw: trimmed,
   });
 };

@@ -105,6 +105,12 @@
   position: relative;
 }
 
+.threat-map-leaflet-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .threat-map-canvas-backdrop {
   position: absolute;
   inset: 0;
@@ -180,6 +186,34 @@
   display: block;
   height: auto;
   width: 100%;
+}
+
+.threat-map-leaflet {
+  border: 1px solid rgba(103, 223, 255, 0.12);
+  border-radius: 20px;
+  min-height: 500px;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+.threat-map-leaflet__map {
+  height: 500px;
+  width: 100%;
+}
+
+.threat-map-tooltip {
+  display: grid;
+  gap: 4px;
+}
+
+.threat-map-tooltip strong {
+  color: #08111f;
+}
+
+.threat-map-tooltip span {
+  color: #243b53;
+  font-size: 0.82rem;
 }
 
 .threat-map-geography-wrap {
@@ -267,14 +301,12 @@
   background: rgba(4, 11, 22, 0.8);
   border: 1px solid rgba(103, 223, 255, 0.14);
   border-radius: 18px;
-  bottom: 16px;
   display: flex;
   gap: 16px;
   justify-content: space-between;
-  left: 16px;
   padding: 14px 16px;
-  position: absolute;
-  right: 16px;
+  position: relative;
+  z-index: 1;
 }
 
 .threat-map-timeline {
@@ -569,6 +601,14 @@
   .threat-map-canvas {
     min-height: 460px;
     padding: 10px;
+  }
+
+  .threat-map-leaflet {
+    min-height: 360px;
+  }
+
+  .threat-map-leaflet__map {
+    height: 360px;
   }
 
   .threat-map-overlay {

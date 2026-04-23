@@ -1,120 +1,89 @@
-# ThreatLens Backend (Production-Ready IDS API)
+# ThreatLens Backend
 
-## Backend Folder Structure
+ThreatLens now runs as a hybrid IDS backend with:
+- a Node.js control API for auth, ingest, incidents, rules, reports, threat intel, and sockets
+- a Python IDS engine for hybrid Random Forest plus SVM analysis
+- Snort-backed NIDS ingest
+- host-agent HIDS ingest with heartbeat and asset health tracking
 
-```
-api-server/
-    config/
-    controllers/
-    logs/
-    middleware/
-    models/
-    routes/
-    services/
-    utils/
-    server.js
-ids-engine/
-```
+## Services
 
-## Environment Setup
+### `api-server`
+- JWT auth with refresh cookies
+- RBAC for `admin`, `analyst`, and `viewer`
+- HMAC-signed agent ingest
+- normalized event pipeline
+- rule detections
+- alert correlation into incidents
+- live Socket.IO events
 
-Create a new file using [backend/api-server/.env.example](api-server/.env.example) as reference.
+### `ids-engine`
+- event feature normalization
+- Random Forest classification
+- SVM anomaly scoring
+- legacy anomaly fallback
+- model health and training metadata
 
-## Run Instructions
+### `host-agent`
+- native Windows and Linux telemetry polling
+- optional JSONL tail mode for lab replay
+- file integrity checks on sensitive paths
+- local disk buffering for resilient delivery
 
-1) Install dependencies
+## Primary API Routes
 
-```
-cd backend/api-server
-npm install
-```
+### Authentication
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
 
-2) Start the API server
+### Ingest and Monitoring
+- `POST /api/logs/ingest`
+- `GET /api/logs`
+- `POST /api/logs/upload`
+- `POST /api/agents/heartbeat`
+- `GET /api/agents/heartbeats`
+- `POST /api/agents/register`
 
-```
-npm run dev
-```
+### Detection and Operations
+- `GET /api/alerts`
+- `PATCH /api/alerts/:id`
+- `GET /api/incidents`
+- `GET /api/incidents/:id`
+- `PATCH /api/incidents/:id`
+- `GET /api/rules`
+- `POST /api/rules`
+- `PATCH /api/rules/:id`
+- `DELETE /api/rules/:id`
 
-3) Run the IDS engine
+### Intelligence and Reporting
+- `GET /api/intel/threat-intel`
+- `GET /api/intel/threat-map`
+- `GET /api/intel/model-health`
+- `GET /api/intel/watchlist`
+- `POST /api/intel/watchlist`
+- `DELETE /api/intel/watchlist/:id`
+- `GET /api/reports`
+- `GET /api/reports/export/alerts.csv`
+- `GET /api/reports/export/logs.csv`
 
-```
-cd ../ids-engine
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-```
-
-## Core API Documentation
-
-### Auth
-
-- POST `/api/auth/register`
-- POST `/api/auth/login`
-- POST `/api/auth/refresh`
-- POST `/api/auth/logout`
-- GET `/api/auth/me`
-
-### Alerts
-
-- GET `/api/alerts?status=&severity=&search=&ip=&page=&limit=`
-- GET `/api/alerts/:id`
-- PATCH `/api/alerts/:id` (status, note)
-- POST `/api/alerts/scan`
-
-### Logs
-
-- GET `/api/logs?level=&source=&search=&ip=&page=&limit=`
-- POST `/api/logs`
-- POST `/api/logs/ingest` (X-API-KEY)
-- POST `/api/logs/upload` (multipart/form-data: file)
-- POST `/api/logs/simulate?count=`
-
-### Dashboard
-
-- GET `/api/dashboard/stats`
-- GET `/api/dashboard/health`
-
-## Security Features
-
-- JWT access tokens + refresh token rotation (HTTP-only cookies)
-- bcrypt password hashing
-- rate limiting and helmet
-- audit logs for registration + login
-- role-based access control (Admin / Analyst)
-- request logging + detection correlation
-
-## IDS Detection Rules (Server-Side)
-
-- Brute force login attempts
-- Unauthorized admin access
-- Request burst / DoS behavior
-- Suspicious IP activity
-
-## Real-Time Events (Socket.io)
-
+## Real-Time Events
+- `logs:new`
 - `alerts:new`
 - `alerts:update`
-- `logs:new`
+- `incidents:new`
+- `incidents:update`
+- `agents:heartbeat`
+- `health:update`
 
-## Architecture
+## Runtime Flow
 
-┌──────────────────────────────┐
-│        Frontend (SOC UI)     │
-│        React Dashboard       │
-└──────────────┬──────────────┘
-                             │ REST + WebSocket
-┌──────────────▼──────────────┐
-│     Backend (Control API)   │
-│ Auth, Alerts, Logs, RBAC    │
-└──────────────┬──────────────┘
-                             │
-┌──────────────▼──────────────┐
-│  IDS Engine (Python Core)   │
-│  Rule + Anomaly Detection   │
-└──────────────┬──────────────┘
-                             │
-┌──────────────▼──────────────┐
-│     Data Sources            │
-│  Logs, Simulated Traffic    │
-└──────────────────────────────┘
+1. Sensors and agents send signed events.
+2. The API normalizes events into the shared schema.
+3. Rule detections run immediately.
+4. The Python IDS engine enriches events with RF and SVM analysis.
+5. Alerts are created or updated.
+6. Correlation rolls alerts into incidents.
+7. Dashboard clients receive live updates over sockets.

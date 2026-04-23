@@ -1,3 +1,4 @@
+import math
 import os
 from typing import Dict, List, Tuple
 
@@ -111,32 +112,35 @@ def _feature_matrix(normalized_event: Dict) -> np.ndarray:
     return np.array([[normalized_event.get(name, 0.0) for name in FEATURE_NAMES]], dtype=float)
 
 
-def _load_artifact(model_path: str):
+def _load_artifact(model_path: str, default_task: str):
     if not config.ENABLE_ANOMALY_DETECTION:
         return {
             "loaded": False,
             "algorithm": None,
-            "task": "fallback",
+            "task": default_task,
             "using_fallback": True,
             "threshold": 0.65,
             "model": None,
             "feature_names": FEATURE_NAMES,
             "trained_at": None,
             "error": "Anomaly detection disabled by configuration",
+            "path": model_path,
+            "training_summary": None,
         }
 
     if not os.path.exists(model_path):
-        logger.warning("Model file missing: %s", model_path)
         return {
             "loaded": False,
             "algorithm": None,
-            "task": "fallback",
+            "task": default_task,
             "using_fallback": True,
             "threshold": 0.65,
             "model": None,
             "feature_names": FEATURE_NAMES,
             "trained_at": None,
             "error": f"Model file missing: {model_path}",
+            "path": model_path,
+            "training_summary": None,
         }
 
     try:
@@ -146,7 +150,8 @@ def _load_artifact(model_path: str):
         threshold = float(artifact.get("threshold", 0.65)) if isinstance(artifact, dict) else 0.65
         algorithm = artifact.get("algorithm", type(model).__name__) if isinstance(artifact, dict) else type(model).__name__
         trained_at = artifact.get("trained_at") if isinstance(artifact, dict) else None
-        task = artifact.get("task", "anomaly") if isinstance(artifact, dict) else "anomaly"
+        task = artifact.get("task", default_task) if isinstance(artifact, dict) else default_task
+        training_summary = artifact.get("training_summary") if isinstance(artifact, dict) else None
 
         return {
             "loaded": True,
@@ -158,36 +163,90 @@ def _load_artifact(model_path: str):
             "feature_names": feature_names,
             "trained_at": trained_at,
             "error": None,
+            "path": model_path,
+            "training_summary": training_summary,
+            "class_names": artifact.get("class_names", []) if isinstance(artifact, dict) else [],
+            "benign_indexes": artifact.get("benign_indexes", []) if isinstance(artifact, dict) else [],
         }
     except Exception as exc:  # pragma: no cover
-        logger.error("Failed to load model: %s", exc)
+        logger.error("Failed to load model from %s: %s", model_path, exc)
         return {
             "loaded": False,
             "algorithm": None,
-            "task": "fallback",
+            "task": default_task,
             "using_fallback": True,
             "threshold": 0.65,
             "model": None,
             "feature_names": FEATURE_NAMES,
             "trained_at": None,
             "error": str(exc),
+            "path": model_path,
+            "training_summary": None,
+            "class_names": [],
+            "benign_indexes": [],
         }
 
 
-MODEL_STATE = _load_artifact(config.MODEL_PATH)
+RF_STATE = _load_artifact(config.RF_MODEL_PATH, "classification")
+SVM_STATE = _load_artifact(config.SVM_MODEL_PATH, "anomaly")
+LEGACY_STATE = _load_artifact(config.MODEL_PATH, "anomaly")
 
 
 def get_model_status() -> Dict:
+    hybrid_loaded = RF_STATE["loaded"] or SVM_STATE["loaded"] or LEGACY_STATE["loaded"]
+    algorithms = [
+        state["algorithm"]
+        for state in (RF_STATE, SVM_STATE, LEGACY_STATE)
+        if state["loaded"] and state["algorithm"]
+    ]
+
+    trained_values = [
+        state["trained_at"] for state in (RF_STATE, SVM_STATE, LEGACY_STATE) if state["trained_at"]
+    ]
+
     return {
-        "loaded": MODEL_STATE["loaded"],
-        "algorithm": MODEL_STATE["algorithm"],
-        "task": MODEL_STATE.get("task", "anomaly"),
-        "using_fallback": MODEL_STATE["using_fallback"],
-        "threshold": MODEL_STATE["threshold"],
-        "trained_at": MODEL_STATE["trained_at"],
-        "model_path": config.MODEL_PATH,
-        "feature_names": MODEL_STATE["feature_names"],
-        "error": MODEL_STATE["error"],
+        "loaded": hybrid_loaded,
+        "algorithm": " + ".join(algorithms) if algorithms else "heuristic-fallback",
+        "task": "hybrid",
+        "using_fallback": not hybrid_loaded,
+        "threshold": min(
+            [
+                state["threshold"]
+                for state in (RF_STATE, SVM_STATE, LEGACY_STATE)
+                if state["loaded"]
+            ]
+            or [0.65]
+        ),
+        "trained_at": max(trained_values) if trained_values else None,
+        "feature_names": FEATURE_NAMES,
+        "rf_model": {
+            "loaded": RF_STATE["loaded"],
+            "algorithm": RF_STATE["algorithm"],
+            "threshold": RF_STATE["threshold"],
+            "trained_at": RF_STATE["trained_at"],
+            "path": RF_STATE["path"],
+            "error": RF_STATE["error"],
+            "training_summary": RF_STATE["training_summary"],
+            "class_names": RF_STATE["class_names"],
+        },
+        "svm_model": {
+            "loaded": SVM_STATE["loaded"],
+            "algorithm": SVM_STATE["algorithm"],
+            "threshold": SVM_STATE["threshold"],
+            "trained_at": SVM_STATE["trained_at"],
+            "path": SVM_STATE["path"],
+            "error": SVM_STATE["error"],
+            "training_summary": SVM_STATE["training_summary"],
+        },
+        "legacy_model": {
+            "loaded": LEGACY_STATE["loaded"],
+            "algorithm": LEGACY_STATE["algorithm"],
+            "threshold": LEGACY_STATE["threshold"],
+            "trained_at": LEGACY_STATE["trained_at"],
+            "path": LEGACY_STATE["path"],
+            "error": LEGACY_STATE["error"],
+            "training_summary": LEGACY_STATE["training_summary"],
+        },
     }
 
 
@@ -225,25 +284,60 @@ def _fallback_score(normalized_event: Dict) -> Tuple[float, str]:
     return score, "Traffic stayed within the fallback baseline"
 
 
-def _model_score(normalized_event: Dict) -> Tuple[float, str]:
-    if not MODEL_STATE["loaded"] or MODEL_STATE["model"] is None:
-        return _fallback_score(normalized_event)
+def _probability_from_distance(value: float) -> float:
+    return 1.0 / (1.0 + math.exp(-value))
+
+
+def _rf_score(normalized_event: Dict) -> Tuple[float, str, str]:
+    if not RF_STATE["loaded"] or RF_STATE["model"] is None:
+        return 0.0, "RandomForest model unavailable", ""
 
     matrix = _feature_matrix(normalized_event)
-    task = MODEL_STATE.get("task", "anomaly")
+    probabilities = RF_STATE["model"].predict_proba(matrix)[0]
+    class_names = RF_STATE.get("class_names") or []
+    benign_indexes = set(RF_STATE.get("benign_indexes") or [])
+    predicted_index = int(np.argmax(probabilities))
+    predicted_class = (
+        class_names[predicted_index] if predicted_index < len(class_names) else str(predicted_index)
+    )
 
-    if task == "classification" and hasattr(MODEL_STATE["model"], "predict_proba"):
-        probabilities = MODEL_STATE["model"].predict_proba(matrix)[0]
-        positive_index = 1 if len(probabilities) > 1 else 0
-        score = float(probabilities[positive_index])
-        if score >= MODEL_STATE["threshold"]:
-            return score, "Supervised model probability crossed the learned malicious threshold"
-        return score, "Supervised model probability stayed inside the benign range"
+    if benign_indexes:
+        benign_probability = float(sum(probabilities[index] for index in benign_indexes if index < len(probabilities)))
+        score = max(0.0, min(1.0, 1.0 - benign_probability))
+    else:
+        score = float(np.max(probabilities))
 
-    score = -float(MODEL_STATE["model"].decision_function(matrix)[0])
-    if score >= MODEL_STATE["threshold"]:
-        return score, "IsolationForest score crossed the learned anomaly threshold"
-    return score, "IsolationForest score stayed inside the learned baseline"
+    if score >= RF_STATE["threshold"]:
+        return (
+            score,
+            f"RandomForest predicted {predicted_class} and crossed the malicious threshold",
+            predicted_class,
+        )
+    return score, f"RandomForest predicted {predicted_class} within the learned baseline", predicted_class
+
+
+def _svm_score(normalized_event: Dict) -> Tuple[float, str]:
+    if not SVM_STATE["loaded"] or SVM_STATE["model"] is None:
+        return 0.0, "SVM model unavailable"
+
+    matrix = _feature_matrix(normalized_event)
+    decision_value = -float(SVM_STATE["model"].decision_function(matrix)[0])
+    score = round(_probability_from_distance(decision_value), 4)
+    if score >= SVM_STATE["threshold"]:
+        return score, "SVM anomaly score crossed the suspicious threshold"
+    return score, "SVM anomaly score stayed within the learned boundary"
+
+
+def _legacy_score(normalized_event: Dict) -> Tuple[float, str]:
+    if not LEGACY_STATE["loaded"] or LEGACY_STATE["model"] is None:
+        return 0.0, "Legacy anomaly model unavailable"
+
+    matrix = _feature_matrix(normalized_event)
+    score = -float(LEGACY_STATE["model"].decision_function(matrix)[0])
+    score = round(min(max(_probability_from_distance(score), 0.0), 1.0), 4)
+    if score >= LEGACY_STATE["threshold"]:
+        return score, "Legacy anomaly model flagged the event"
+    return score, "Legacy anomaly model stayed within baseline"
 
 
 def _build_severity(score: float, threshold: float) -> Tuple[bool, str, float, int]:
@@ -263,27 +357,63 @@ def _build_severity(score: float, threshold: float) -> Tuple[bool, str, float, i
 
 def analyze_event(event: Dict) -> Dict:
     normalized = normalize_event(event or {})
-    score, reason = _model_score(normalized)
-    threshold = float(MODEL_STATE["threshold"])
 
-    if MODEL_STATE["using_fallback"]:
-        score = round(score, 4)
-        threshold = 0.65
+    rf_score, rf_reason, rf_class = _rf_score(normalized)
+    svm_score, svm_reason = _svm_score(normalized)
+    legacy_score, legacy_reason = _legacy_score(normalized)
 
-    is_anomaly, severity, confidence, risk_score = _build_severity(score, threshold)
+    if RF_STATE["loaded"] or SVM_STATE["loaded"] or LEGACY_STATE["loaded"]:
+      combined_score = max(rf_score, svm_score, legacy_score)
+      threshold = min(
+          [
+              state["threshold"]
+              for state in (RF_STATE, SVM_STATE, LEGACY_STATE)
+              if state["loaded"]
+          ]
+          or [0.55]
+      )
+      reason = " | ".join(
+          [message for message in [rf_reason, svm_reason, legacy_reason] if "unavailable" not in message.lower()]
+      ) or "Hybrid models evaluated the event"
+    else:
+      combined_score, reason = _fallback_score(normalized)
+      threshold = 0.65
+
+    is_anomaly, severity, confidence, risk_score = _build_severity(combined_score, threshold)
 
     return {
-        "algorithm": MODEL_STATE["algorithm"] or "heuristic-fallback",
-        "task": MODEL_STATE.get("task", "fallback"),
-        "using_fallback": MODEL_STATE["using_fallback"],
+        "algorithm": get_model_status()["algorithm"],
+        "task": "hybrid",
+        "using_fallback": not (RF_STATE["loaded"] or SVM_STATE["loaded"] or LEGACY_STATE["loaded"]),
         "is_anomaly": is_anomaly,
-        "score": round(score, 4),
+        "score": round(combined_score, 4),
         "threshold": threshold,
         "severity": severity,
         "confidence": confidence,
         "risk_score": risk_score,
         "reason": reason,
         "features": normalized,
+        "submodels": {
+            "random_forest": {
+                "loaded": RF_STATE["loaded"],
+                "score": round(rf_score, 4),
+                "threshold": RF_STATE["threshold"],
+                "reason": rf_reason,
+                "predicted_class": rf_class,
+            },
+            "svm": {
+                "loaded": SVM_STATE["loaded"],
+                "score": round(svm_score, 4),
+                "threshold": SVM_STATE["threshold"],
+                "reason": svm_reason,
+            },
+            "legacy": {
+                "loaded": LEGACY_STATE["loaded"],
+                "score": round(legacy_score, 4),
+                "threshold": LEGACY_STATE["threshold"],
+                "reason": legacy_reason,
+            },
+        },
     }
 
 

@@ -1,12 +1,15 @@
 const { parse } = require("csv-parse/sync");
 
 const Log = require("../models/Log");
-const config = require("../config/env");
 const { evaluateLog } = require("../services/detector.service");
 const { analyzeLogs } = require("../services/detection.service");
-const { generateTrafficBatch } = require("../services/traffic.service");
-const { emitToOrganization } = require("../socket");
-const { sha256 } = require("../utils/ingestSignature");
+const { publishEvent } = require("../services/event-stream.service");
+const { normalizeSecurityEvent, toSafeNumber } = require("../services/normalization.service");
+const {
+  emitDashboardUpdate,
+  emitNewLog,
+  emitStreamEvent,
+} = require("../services/socket.service");
 
 const clampInt = (value, fallback, min, max) => {
   const parsed = Number.parseInt(value, 10);
@@ -14,96 +17,14 @@ const clampInt = (value, fallback, min, max) => {
   return Math.min(Math.max(parsed, min), max);
 };
 
-const normalizeTimestamp = (value) => {
-  const parsed = new Date(value || Date.now());
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
-};
-
-const sanitizeMetadata = (metadata) =>
-  metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
-
 const buildSnortLogMatch = () => ({
-  $or: [{ source: "snort" }, { "metadata.snort": { $exists: true, $ne: null } }],
+  $or: [
+    { source: "snort" },
+    { source: "suricata" },
+    { "metadata.sensorType": { $in: ["snort", "suricata"] } },
+    { "metadata.snort": { $exists: true, $ne: null } },
+  ],
 });
-
-const truncateTimestampToSecond = (timestamp) => {
-  const value = new Date(timestamp || Date.now());
-  value.setMilliseconds(0);
-  return value.toISOString();
-};
-
-const toSafeNumber = (value) => {
-  if (value === null || value === undefined || value === "") return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
-
-const buildEventFingerprint = (normalizedLog) =>
-  sha256(
-    JSON.stringify(
-      normalizedLog.source === "snort" || normalizedLog.metadata?.snort
-        ? {
-            source: "snort",
-            eventType: normalizedLog.eventType || "snort.alert",
-            timestamp: truncateTimestampToSecond(normalizedLog.timestamp),
-            message: normalizedLog.message,
-            protocol:
-              normalizedLog.metadata?.protocol ||
-              normalizedLog.metadata?.appProtocol ||
-              normalizedLog.metadata?.snort?.protocol ||
-              null,
-            snort: {
-              generatorId: normalizedLog.metadata?.snort?.generatorId || null,
-              signatureId: normalizedLog.metadata?.snort?.signatureId || null,
-              revision: normalizedLog.metadata?.snort?.revision || null,
-              classification: normalizedLog.metadata?.snort?.classification || null,
-              priority: normalizedLog.metadata?.snort?.priority || null,
-              srcIp: normalizedLog.metadata?.snort?.srcIp || normalizedLog.ip || null,
-              srcPort: normalizedLog.metadata?.snort?.srcPort || null,
-              destIp: normalizedLog.metadata?.snort?.destIp || null,
-              destPort:
-                normalizedLog.metadata?.snort?.destPort ??
-                normalizedLog.metadata?.destinationPort ??
-                normalizedLog.metadata?.port ??
-                null,
-            },
-          }
-        : {
-            assetId: normalizedLog._asset_id?.toString?.() || normalizedLog._asset_id || null,
-            source: normalizedLog.source,
-            eventType: normalizedLog.eventType || null,
-            message: normalizedLog.message,
-            ip: normalizedLog.ip || null,
-            endpoint: normalizedLog.endpoint || null,
-            method: normalizedLog.method || null,
-            statusCode: normalizedLog.statusCode || null,
-            timestamp: normalizedLog.timestamp.toISOString(),
-            protocol:
-              normalizedLog.metadata?.protocol ||
-              normalizedLog.metadata?.appProtocol ||
-              normalizedLog.metadata?.snort?.protocol ||
-              null,
-            destinationPort:
-              normalizedLog.metadata?.destinationPort ??
-              normalizedLog.metadata?.port ??
-              normalizedLog.metadata?.snort?.destPort ??
-              null,
-            snort: normalizedLog.metadata?.snort
-              ? {
-                  generatorId: normalizedLog.metadata.snort.generatorId || null,
-                  signatureId: normalizedLog.metadata.snort.signatureId || null,
-                  revision: normalizedLog.metadata.snort.revision || null,
-                  classification: normalizedLog.metadata.snort.classification || null,
-                  priority: normalizedLog.metadata.snort.priority || null,
-                  srcIp: normalizedLog.metadata.snort.srcIp || null,
-                  srcPort: normalizedLog.metadata.snort.srcPort || null,
-                  destIp: normalizedLog.metadata.snort.destIp || null,
-                  destPort: normalizedLog.metadata.snort.destPort || null,
-                }
-              : null,
-          }
-    )
-  );
 
 const getBulkUpsertedIndexes = (result) => {
   const upsertedIds =
@@ -131,37 +52,18 @@ const isDuplicateOnlyBulkError = (error) =>
     error.writeErrors.every((entry) => entry?.code === 11000));
 
 const normalizeLogEntry = (item, context = {}) => {
-  const metadata = sanitizeMetadata(item.metadata);
-  const timestamp = normalizeTimestamp(item.timestamp);
-
-  const snortPriority = toSafeNumber(metadata?.snort?.priority);
-  const inferredLevel =
-    snortPriority !== undefined && snortPriority <= 2 ? "warn" : "info";
-
-  let normalized = {
-    message: String(item.message || "").trim(),
-    level: String(item.level || "").trim().toLowerCase() || inferredLevel,
-    source: String(item.source || context.defaultSource || "agent").trim(),
-    ip: String(item.ip || metadata?.snort?.srcIp || context.ip || "").trim(),
-    userId: item.userId || undefined,
-    endpoint: item.endpoint || metadata.endpoint || undefined,
-    method: item.method || metadata.method || undefined,
-    statusCode:
-      item.statusCode !== undefined && item.statusCode !== null
-        ? toSafeNumber(item.statusCode)
-        : toSafeNumber(metadata.statusCode),
-    eventType: item.eventType || metadata.eventType || undefined,
-    metadata: {
-      ...metadata,
-      statusCode:
-        item.statusCode !== undefined && item.statusCode !== null
-          ? toSafeNumber(item.statusCode)
-          : toSafeNumber(metadata.statusCode),
-    },
-    timestamp,
-    _asset_id: context.assetId || item._asset_id || undefined,
-    _org_id: context.orgId || item._org_id || undefined,
-  };
+  let normalized = normalizeSecurityEvent(item, context);
+  const sensorType = String(
+    item?.sensorType ||
+      item?.metadata?.sensorType ||
+      item?.sensor_type ||
+      normalized?.metadata?.sensorType ||
+      normalized?.source ||
+      context.defaultSource ||
+      "unknown"
+  )
+    .trim()
+    .toLowerCase();
 
   // If this is a backend/API log, ensure all table columns are present with placeholders
   if (normalized.source === "backend" || normalized.source === "api" || normalized.endpoint) {
@@ -197,71 +99,42 @@ const normalizeLogEntry = (item, context = {}) => {
     normalized.metadata.port = toSafeNumber(normalized.metadata.port);
   }
 
-  if (normalized.metadata?.snort) {
-    normalized.metadata.snort = {
-      ...normalized.metadata.snort,
-      priority: toSafeNumber(normalized.metadata.snort.priority),
-      generatorId: toSafeNumber(normalized.metadata.snort.generatorId),
-      signatureId: toSafeNumber(normalized.metadata.snort.signatureId),
-      revision: toSafeNumber(normalized.metadata.snort.revision),
-      srcPort: toSafeNumber(normalized.metadata.snort.srcPort),
-      destPort: toSafeNumber(normalized.metadata.snort.destPort),
-    };
-  }
+  normalized.metadata = {
+    ...(normalized.metadata || {}),
+    sensorType,
+    pipeline: normalized.metadata?.pipeline || "realtime",
+  };
 
-  normalized.eventId = String(item.eventId || buildEventFingerprint(normalized));
   return normalized;
 };
 
 const emitLogsCreated = ({ orgId, logs, source, duplicateCount = 0, mode = "live" }) => {
   if (!logs.length) return;
 
-  emitToOrganization(orgId, "logs:new", {
-    type: "created",
-    organizationId: orgId?.toString?.() || orgId || null,
-    data: logs[0],
+  emitNewLog(orgId, logs[0], {
+    insertedCount: logs.length,
+    duplicateCount,
+    source,
+    mode,
     items: logs.slice(0, 5),
-    meta: {
-      insertedCount: logs.length,
-      duplicateCount,
-      source,
-      mode,
-    },
   });
 
-  emitToOrganization(orgId, "dashboard:update", {
-    organizationId: orgId?.toString?.() || orgId || null,
+  emitDashboardUpdate(orgId, {
     source,
     mode,
     insertedCount: logs.length,
     duplicateCount,
     lastLog: logs[0] || null,
-    timestamp: new Date().toISOString(),
-  });
-};
-
-const emitAlertsHint = ({ orgId, logs }) => {
-  if (!logs.length) return;
-
-  const possibleAlerts = logs.filter((log) => {
-    const severityPriority = toSafeNumber(log?.metadata?.snort?.priority);
-    const level = String(log?.level || "").toLowerCase();
-    return (
-      log?.source === "snort" ||
-      !!log?.metadata?.snort ||
-      level === "warn" ||
-      level === "error" ||
-      (severityPriority !== undefined && severityPriority <= 2)
-    );
   });
 
-  if (!possibleAlerts.length) return;
-
-  emitToOrganization(orgId, "alerts:new", {
-    organizationId: orgId?.toString?.() || orgId || null,
-    count: possibleAlerts.length,
-    items: possibleAlerts.slice(0, 5),
-    timestamp: new Date().toISOString(),
+  emitStreamEvent(orgId, {
+    type: "telemetry.batch.persisted",
+    source,
+    mode,
+    duplicateCount,
+    insertedCount: logs.length,
+    sensorTypes: [...new Set(logs.map((log) => log?.metadata?.sensorType).filter(Boolean))],
+    latestEvent: logs[0] || null,
   });
 };
 
@@ -337,17 +210,30 @@ const persistLogs = async (entries, { orgId, source, mode }) => {
 
   const idsAnalysis = await runDetections(stored);
 
+  await publishEvent("telemetry.batch.persisted", {
+    organizationId: orgId?.toString?.() || orgId || null,
+    source,
+    mode,
+    insertedCount: stored.length,
+    duplicateCount,
+    sensorTypes: [...new Set(stored.map((log) => log?.metadata?.sensorType).filter(Boolean))],
+    latestEvent: stored[0]
+      ? {
+          id: stored[0]._id?.toString?.() || null,
+          message: stored[0].message,
+          source: stored[0].source,
+          timestamp: stored[0].timestamp,
+          sensorType: stored[0]?.metadata?.sensorType || stored[0].source,
+        }
+      : null,
+  });
+
   emitLogsCreated({
     orgId,
     logs: stored,
     source,
     duplicateCount,
     mode,
-  });
-
-  emitAlertsHint({
-    orgId,
-    logs: stored,
   });
 
   return {
@@ -571,70 +457,9 @@ const uploadLogs = async (req, res) => {
   }
 };
 
-const simulateTraffic = async (req, res) => {
-  try {
-    if (!config.allowSyntheticTraffic) {
-      return res.status(403).json({
-        message: "Synthetic traffic is disabled. Use the live Snort agent for real-time data.",
-      });
-    }
-
-    if (!req.orgId) {
-      return res.status(400).json({ message: "Organization not found" });
-    }
-
-    const count = clampInt(req.query.count || "10", 10, 1, 200);
-    const samples = generateTrafficBatch(count);
-
-    const normalizedLogs = samples.map((sample) =>
-      normalizeLogEntry(
-        {
-          message: `${sample.protocol} traffic sample on port ${sample.destinationPort}`,
-          level:
-            sample.severityHint === "Critical" || sample.severityHint === "High"
-              ? "warn"
-              : "info",
-          source: "simulator",
-          ip: sample.ip,
-          endpoint: sample.endpoint,
-          method: sample.method,
-          statusCode: sample.statusCode,
-          eventType: "request",
-          metadata: {
-            ...sample,
-            demo: true,
-          },
-        },
-        {
-          orgId: req.orgId,
-          defaultSource: "simulator",
-        }
-      )
-    );
-
-    const result = await persistLogs(normalizedLogs, {
-      orgId: req.orgId,
-      source: "simulator",
-      mode: "demo",
-    });
-
-    return res.status(201).json({
-      data: result.stored,
-      meta: {
-        insertedCount: result.insertedCount,
-        duplicateCount: result.duplicateCount,
-      },
-    });
-  } catch (error) {
-    console.error("simulateTraffic error:", error);
-    return res.status(500).json({ message: "Failed to simulate traffic" });
-  }
-};
-
 module.exports = {
   listLogs,
   createLog,
   ingestLogs,
   uploadLogs,
-  simulateTraffic,
 };

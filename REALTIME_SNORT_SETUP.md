@@ -1,8 +1,8 @@
-# ThreatLens Real-Time Snort Setup
+# ThreatLens Real-Time Collector Setup
 
-This guide is for the real pipeline only:
+This guide is for the current real pipeline:
 
-`Snort -> agent -> backend -> MongoDB -> detections -> sockets -> dashboard`
+`Host telemetry / Snort / Suricata -> collector -> backend -> MongoDB -> detections -> sockets -> dashboard`
 
 ## 1. Start MongoDB
 
@@ -25,7 +25,7 @@ ALLOW_SYNTHETIC_TRAFFIC=false
 ENABLE_IDS_ANALYSIS=true
 ```
 
-## 3. Create Or Refresh Agent Credentials
+## 3. Create Or Refresh Collector Credentials
 
 ```powershell
 cd backend\api-server
@@ -38,7 +38,7 @@ This will sync:
 - `THREATLENS_API_SECRET`
 - `ASSET_ID`
 
-into `backend/agent/.env`.
+into `backend/collector/.env`.
 
 ## 4. Train And Start The Python IDS Engine
 
@@ -63,32 +63,53 @@ IDS engine:
 IDS_ENGINE_API_KEY=my-shared-key
 ```
 
-## 5. Point The Agent At Real Snort Files
+## 5. Configure The Collector Mode
 
-Update `backend/agent/.env`:
+Update `backend/collector/.env`.
+
+### HIDS mode
 
 ```env
-AGENT_MODE=snort
-SNORT_FAST_LOG_PATH=C:\snort\log\alert_fast.txt
-SNORT_EVE_JSON_PATH=C:\snort\log\eve.json
+SENSOR_TYPE=host
+HOST_EVENTS_PATH=D:\Major Project\ThreatLens\backend\collector\sample-host-events.jsonl
 ```
 
-Only one path is required. If both are enabled, ThreatLens will suppress duplicate inserts by event fingerprint.
+### Snort mode
 
-## 6. Start The Agent
+```env
+SENSOR_TYPE=snort
+SNORT_FAST_LOG_PATH=C:\snort\log\alert_fast.txt
+```
+
+### Suricata mode
+
+```env
+SENSOR_TYPE=suricata
+SURICATA_EVE_JSON_PATH=C:\suricata\log\eve.json
+```
+
+Only one mode should be active at a time.
+
+## 6. Start The Collector
 
 ```powershell
-cd backend\agent
-npm install
-npm start
+cd backend\collector
+python snort_collector.py
 ```
 
-Healthy agent log signs:
+For Suricata mode:
 
-- `Watching Snort fast alert file`
-- `Watching Snort EVE JSON file`
-- `Live Snort event buffered`
-- `Submit success`
+```powershell
+cd backend\collector
+python suricata_collector.py
+```
+
+Healthy collector log signs:
+
+- `[host] sent`
+- `[snort] sent`
+- `[suricata] sent`
+- heartbeat updates visible in `/api/dashboard/health`
 
 ## 7. Start The Frontend
 
@@ -100,11 +121,11 @@ npm start
 
 ## 8. Verify End-To-End
 
-1. Trigger a real Snort rule hit.
-2. Confirm the agent logs a buffered event and a successful submit.
-3. Confirm MongoDB receives a `Log` with `source=snort`.
+1. Trigger a host event append, a real Snort rule hit, or a Suricata alert.
+2. Confirm the collector logs a successful submit.
+3. Confirm MongoDB receives a `Log` with `source=host`, `source=snort`, or `source=suricata`.
 4. Confirm related alerts appear from:
-   - `source=snort`
+   - `source=snort` or `source=suricata` for direct IDS alerts
    - `source=rule-engine`
    - `source=ids-engine-ml` when the ML analysis flags an anomaly
 5. Confirm the dashboard updates without manual refresh.
@@ -128,22 +149,22 @@ This gives you several safe test alerts such as:
 
 ## 9. Fast Troubleshooting
 
-### Backend shows `snort.status=offline`
+### Backend shows the collector or sensor offline
 
-- No fresh Snort logs were ingested in the last 5 minutes.
-- Check the agent path and Snort output.
+- No fresh telemetry or heartbeat was ingested in the last 5 minutes.
+- Check the collector path and selected mode.
 
-### Agent returns `401`
+### Collector returns `401`
 
 - Run `node setup-dev-keys.js` again.
-- Make sure the agent `.env` matches the newly generated token and secret.
+- Make sure the collector `.env` matches the newly generated token and secret.
 
 ### IDS engine is offline
 
 - Start `backend/ids-engine/app.py`
 - Check `http://localhost:8000/health`
 
-### Dashboard still shows old demo data
+### Dashboard still shows old data
 
 - Existing demo rows can remain in MongoDB.
-- New dashboard queries now prioritize live Snort data and real alert sources.
+- New dashboard queries now prioritize live host telemetry, IDS data, and real alert sources.

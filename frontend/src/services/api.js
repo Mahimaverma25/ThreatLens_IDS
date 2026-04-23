@@ -1,38 +1,12 @@
 import axios from "axios";
-
-/* ================= BASE API ================= */
-
-const trimTrailingSlashes = (value) => value.replace(/\/+$/, "");
-
-const resolveApiBaseUrl = () => {
-  const configuredBaseUrl = (process.env.REACT_APP_API_URL || "").trim();
-
-  if (!configuredBaseUrl) {
-    return "/api";
-  }
-
-  if (typeof window === "undefined") {
-    return trimTrailingSlashes(configuredBaseUrl);
-  }
-
-  try {
-    const resolvedUrl = new URL(configuredBaseUrl, window.location.origin);
-    const appHostname = window.location.hostname;
-    const localhostHosts = new Set(["localhost", "127.0.0.1"]);
-
-    // Avoid shipping a localhost API target into non-local environments.
-    if (localhostHosts.has(resolvedUrl.hostname) && !localhostHosts.has(appHostname)) {
-      return "/api";
-    }
-
-    return trimTrailingSlashes(resolvedUrl.toString());
-  } catch {
-    return trimTrailingSlashes(configuredBaseUrl);
-  }
-};
+import {
+  getActiveApiBaseUrl,
+  getNextApiBaseUrl,
+  setActiveApiBaseUrl,
+} from "./connection";
 
 const api = axios.create({
-  baseURL: resolveApiBaseUrl(),
+  baseURL: getActiveApiBaseUrl(),
   timeout: 10000,
   withCredentials: true,
 });
@@ -98,7 +72,27 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (!originalRequest || !error.response) {
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
+
+    if (!error.response) {
+      const nextBaseUrl = getNextApiBaseUrl(
+        originalRequest.baseURL || api.defaults.baseURL
+      );
+
+      if (
+        nextBaseUrl &&
+        !originalRequest._localFailoverTried &&
+        typeof window !== "undefined"
+      ) {
+        originalRequest._localFailoverTried = true;
+        originalRequest.baseURL = setActiveApiBaseUrl(nextBaseUrl);
+        api.defaults.baseURL = originalRequest.baseURL;
+
+        return api(originalRequest);
+      }
+
       return Promise.reject(error);
     }
 
@@ -201,8 +195,6 @@ export const alerts = {
   get: (id) => api.get(`/alerts/${id}`),
 
   update: (id, payload) => api.patch(`/alerts/${id}`, payload),
-
-  scan: () => api.post("/alerts/scan"),
 };
 
 /* ================= LOGS ================= */
@@ -220,8 +212,6 @@ export const logs = {
     return api.post("/logs/upload", formData);
   },
 
-  simulate: (count = 10) => api.post(`/logs/simulate?count=${count}`),
-
   ingest: (payload, apiKey) =>
     api.post("/logs/ingest", payload, {
       headers: { "x-api-key": apiKey },
@@ -233,6 +223,33 @@ export const logs = {
 export const dashboard = {
   stats: () => api.get("/dashboard/stats"),
   health: () => api.get("/dashboard/health"),
+};
+
+export const intel = {
+  threatIntel: () => api.get("/intel/threat-intel"),
+  threatMap: () => api.get("/intel/threat-map"),
+  modelHealth: () => api.get("/intel/model-health"),
+  watchlist: () => api.get("/intel/watchlist"),
+  createIndicator: (payload) => api.post("/intel/watchlist", payload),
+  deleteIndicator: (id) => api.delete(`/intel/watchlist/${id}`),
+};
+
+export const incidents = {
+  list: (filters = {}) => api.get("/incidents", { params: filters }),
+  get: (id) => api.get(`/incidents/${id}`),
+  update: (id, payload) => api.patch(`/incidents/${id}`, payload),
+};
+
+export const rules = {
+  list: (filters = {}) => api.get("/rules", { params: filters }),
+  create: (payload) => api.post("/rules", payload),
+  update: (id, payload) => api.patch(`/rules/${id}`, payload),
+  remove: (id) => api.delete(`/rules/${id}`),
+};
+
+export const playbooks = {
+  list: () => api.get("/playbooks"),
+  execute: (payload) => api.post("/playbooks/execute", payload),
 };
 
 export const reports = {
@@ -254,6 +271,11 @@ export const assets = {
   create: (payload) => api.post("/assets", payload),
   update: (id, payload) => api.patch(`/assets/${id}`, payload),
   remove: (id) => api.delete(`/assets/${id}`)
+};
+
+export const agents = {
+  register: (payload) => api.post("/agents/register", payload),
+  heartbeats: () => api.get("/agents/heartbeats"),
 };
 
 export const users = {

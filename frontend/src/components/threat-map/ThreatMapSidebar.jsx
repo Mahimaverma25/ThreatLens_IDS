@@ -26,17 +26,25 @@ const withPercentages = (entries) => {
   }));
 };
 
-const ThreatMapSidebar = ({ attacks, intervalLabel, highlightedAttackId, onHighlight }) => {
+const ThreatMapSidebar = ({
+  attacks,
+  intervalLabel,
+  streamStatus,
+  maxRisk,
+  highlightedAttackId,
+  onHighlight,
+}) => {
   const topAttackers = withPercentages(getTopEntries(attacks, (attack) => attack.source.country));
   const topTargets = withPercentages(getTopEntries(attacks, (attack) => attack.target.country));
   const attackTypes = withPercentages(getTopEntries(attacks, (attack) => attack.attackType));
+  const topSensors = withPercentages(getTopEntries(attacks, (attack) => attack.sensorType || "unknown"));
 
   return (
     <aside className="threat-map-sidebar">
       <div className="threat-map-panel">
         <span className="threat-map-panel-kicker">Threat Summary</span>
         <h2>Live Cyber Threat Map</h2>
-        <p>Simulated global attack telemetry with auto-refreshing arcs, target hotspots, and severity trends.</p>
+        <p>Leaflet-powered live attack telemetry with active origin and target hotspots from your detection pipeline.</p>
         <div className="threat-map-mini-meta">
           <span>Statistics interval</span>
           <strong>{intervalLabel}</strong>
@@ -51,6 +59,14 @@ const ThreatMapSidebar = ({ attacks, intervalLabel, highlightedAttackId, onHighl
         <div className="threat-map-metric">
           <span>High Severity</span>
           <strong>{attacks.filter((attack) => attack.severity === "high").length}</strong>
+        </div>
+        <div className="threat-map-metric">
+          <span>Max Risk</span>
+          <strong>{maxRisk}</strong>
+        </div>
+        <div className="threat-map-metric">
+          <span>Stream Status</span>
+          <strong>{streamStatus}</strong>
         </div>
       </div>
 
@@ -74,6 +90,20 @@ const ThreatMapSidebar = ({ attacks, intervalLabel, highlightedAttackId, onHighl
         </div>
         <div className="threat-map-list">
           {topTargets.map((entry) => (
+            <div key={entry.label} className="threat-map-list-row">
+              <span>{entry.label}</span>
+              <strong>{entry.percentage}%</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="threat-map-panel">
+        <div className="threat-map-panel-head">
+          <h3>Sensor Distribution</h3>
+        </div>
+        <div className="threat-map-list">
+          {topSensors.map((entry) => (
             <div key={entry.label} className="threat-map-list-row">
               <span>{entry.label}</span>
               <strong>{entry.percentage}%</strong>

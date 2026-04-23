@@ -4,17 +4,26 @@ import MainLayout from "../layout/MainLayout";
 import { alerts } from "../services/api";
 import useSocket from "../hooks/useSocket";
 
+const resolveSocketAlert = (payload) => payload?.data || payload;
+
+const formatTimestamp = (value) => {
+  if (!value) return "No data";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "No data" : date.toLocaleString();
+};
+
 const Alerts = () => {
   const [alertList, setAlertList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [collectorHeartbeat, setCollectorHeartbeat] = useState(null);
   const [filters, setFilters] = useState({
     status: "",
     severity: "",
     search: "",
-    source: ""
+    source: "",
   });
 
   const limit = 20;
@@ -22,6 +31,11 @@ const Alerts = () => {
   const abortRef = useRef(null);
   const isMountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
+  const alertListRef = useRef([]);
+
+  useEffect(() => {
+    alertListRef.current = alertList;
+  }, [alertList]);
 
   const fetchAlerts = useCallback(async () => {
     try {
@@ -54,21 +68,66 @@ const Alerts = () => {
     }
   }, [page, filters]);
 
-  const socketHandlers = useMemo(
-    () => ({
-      "alerts:new": () => {
-        clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = setTimeout(fetchAlerts, 300);
-      },
-      "alerts:update": () => {
-        clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = setTimeout(fetchAlerts, 300);
-      }
-    }),
-    [fetchAlerts]
+  const scheduleRefresh = useCallback(() => {
+    clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(fetchAlerts, 300);
+  }, [fetchAlerts]);
+
+  const hasActiveFilters = useMemo(
+    () => Object.values(filters).some((value) => String(value || "").trim() !== ""),
+    [filters]
   );
 
-  useSocket(token, socketHandlers);
+  const mergeIncomingAlert = useCallback((incoming, prepend = false) => {
+    if (!incoming?._id) {
+      scheduleRefresh();
+      return;
+    }
+
+    const exists = alertListRef.current.some((item) => item._id === incoming._id);
+
+    setAlertList((current) => {
+      const next = current.map((item) => (item._id === incoming._id ? { ...item, ...incoming } : item));
+      if (exists) {
+        return prepend ? next.sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp)) : next;
+      }
+
+      const merged = prepend ? [incoming, ...next] : [...next, incoming];
+      return merged.slice(0, limit);
+    });
+
+    if (!exists) {
+      setTotal((current) => current + 1);
+    }
+  }, [limit, scheduleRefresh]);
+
+  const socketState = useSocket(
+    token,
+    useMemo(
+      () => ({
+        "alerts:new": (payload) => {
+          const incoming = resolveSocketAlert(payload);
+          if (page !== 1 || hasActiveFilters) {
+            scheduleRefresh();
+            return;
+          }
+          mergeIncomingAlert(incoming, true);
+        },
+        "alerts:update": (payload) => {
+          const incoming = resolveSocketAlert(payload);
+          if (page !== 1 || hasActiveFilters) {
+            scheduleRefresh();
+            return;
+          }
+          mergeIncomingAlert(incoming, false);
+        },
+        "collector:heartbeat": (payload) => {
+          setCollectorHeartbeat(payload?.data || payload || null);
+        },
+      }),
+      [hasActiveFilters, mergeIncomingAlert, page, scheduleRefresh]
+    )
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -117,7 +176,7 @@ const Alerts = () => {
       avgRisk: alertList.length ? Math.round(totals.risk / alertList.length) : 0,
       critical: totals.critical,
       high: totals.high,
-      investigating: totals.investigating
+      investigating: totals.investigating,
     };
   }, [alertList]);
 
@@ -144,6 +203,24 @@ const Alerts = () => {
       </section>
 
       {error && <div className="error-message">{error}</div>}
+
+      <section className="metrics-grid">
+        <div className="metric-card">
+          <span>Socket</span>
+          <strong>{socketState.connectionStatus}</strong>
+          <small>{socketState.lastError || "Live channel status"}</small>
+        </div>
+        <div className="metric-card">
+          <span>Collector</span>
+          <strong>{collectorHeartbeat?.status || "unknown"}</strong>
+          <small>{collectorHeartbeat?.agentType || "Waiting for heartbeat"}</small>
+        </div>
+        <div className="metric-card">
+          <span>Last Heartbeat</span>
+          <strong>{formatTimestamp(collectorHeartbeat?.receivedAt)}</strong>
+          <small>{collectorHeartbeat?.hostname || "No collector signal yet"}</small>
+        </div>
+      </section>
 
       <section className="metrics-grid">
         <div className="metric-card">
@@ -259,19 +336,14 @@ const Alerts = () => {
                     <td>{Math.round((alert.confidence || 0) * 100)}%</td>
                     <td>{alert.risk_score ?? 50}</td>
                     <td>{alert.status}</td>
-                    <td>
-                      {alert.timestamp ? new Date(alert.timestamp).toLocaleString() : "-"}
-                    </td>
+                    <td>{alert.timestamp ? new Date(alert.timestamp).toLocaleString() : "-"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
             <div className="pagination">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page === 1}
-              >
+              <button onClick={() => setPage((p) => Math.max(p - 1, 1))} disabled={page === 1}>
                 Previous
               </button>
 

@@ -10,8 +10,7 @@ const {
   listLogs,
   createLog,
   ingestLogs,
-  uploadLogs,
-  simulateTraffic
+  uploadLogs
 } = require("../controllers/logs.controller");
 
 const upload = multer({
@@ -54,15 +53,6 @@ router.post(
   authorizeAdmin,
   upload.single("file"),
   asyncHandler(uploadLogs)
-);
-
-// Simulate traffic
-router.post(
-  "/simulate",
-  authenticate,
-  orgIsolation,
-  authorizeAdmin,
-  asyncHandler(simulateTraffic)
 );
 
 module.exports = router;

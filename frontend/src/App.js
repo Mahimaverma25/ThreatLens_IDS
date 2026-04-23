@@ -17,6 +17,7 @@ import Rules from "./pages/Rules";
 import ThreatIntel from "./pages/ThreatIntel";
 import Reports from "./pages/Reports";
 import AccessManagement from "./pages/AccessManagement";
+import Users from "./pages/Users";
 import ModelHealth from "./pages/ModelHealth";
 import ResponsePlaybooks from "./pages/ResponsePlaybooks";
 import ThreatMap from "./pages/ThreatMap";
@@ -34,8 +35,7 @@ const normalizeRole = (role) => {
 
   const value = String(role).toLowerCase().trim();
 
-  // Backward compatibility for older backend/frontend role names
-  if (value === "viewer") return "analyst";
+  if (value === "user") return "analyst";
   return value;
 };
 
@@ -226,7 +226,7 @@ function AppRoutes() {
       <Route
         path="/incidents"
         element={
-          <AppPage allowedRoles={["admin"]}>
+          <AppPage allowedRoles={["admin", "analyst"]}>
             <Incidents />
           </AppPage>
         }
@@ -244,7 +244,7 @@ function AppRoutes() {
       <Route
         path="/rules"
         element={
-          <AppPage allowedRoles={["admin"]}>
+          <AppPage allowedRoles={["admin", "analyst", "viewer"]}>
             <Rules />
           </AppPage>
         }
@@ -269,9 +269,18 @@ function AppRoutes() {
       />
 
       <Route
-        path="/model-health"
+        path="/users"
         element={
           <AppPage allowedRoles={["admin"]}>
+            <Users />
+          </AppPage>
+        }
+      />
+
+      <Route
+        path="/model-health"
+        element={
+          <AppPage allowedRoles={["admin", "analyst"]}>
             <ModelHealth />
           </AppPage>
         }

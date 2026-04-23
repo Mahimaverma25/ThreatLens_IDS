@@ -5,10 +5,12 @@ import { useAuth } from "../context/AuthContext";
 
 const emptyForm = {
   asset_name: "",
-  asset_type: "web_server",
+  asset_type: "agent",
   asset_criticality: "medium",
   hostname: "",
-  ip_address: ""
+  ip_address: "",
+  host_platform: "windows",
+  telemetry_types: ["host"]
 };
 
 const Assets = () => {
@@ -41,7 +43,11 @@ const Assets = () => {
     try {
       setSaving(true);
       setError("");
-      await assets.create(form);
+      if (form.asset_type === "agent") {
+        await assets.create(form);
+      } else {
+        await assets.create(form);
+      }
       setForm(emptyForm);
       await loadAssets();
     } catch (saveError) {
@@ -117,11 +123,11 @@ const Assets = () => {
               value={form.asset_type}
               onChange={(event) => setForm((previous) => ({ ...previous, asset_type: event.target.value }))}
             >
+              <option value="agent">Agent</option>
               <option value="web_server">Web Server</option>
               <option value="api_server">API Server</option>
               <option value="database">Database</option>
               <option value="firewall">Firewall</option>
-              <option value="agent">Agent</option>
               <option value="other">Other</option>
             </select>
             <select
@@ -143,6 +149,14 @@ const Assets = () => {
               placeholder="IP address"
               onChange={(event) => setForm((previous) => ({ ...previous, ip_address: event.target.value }))}
             />
+            <select
+              value={form.host_platform}
+              onChange={(event) => setForm((previous) => ({ ...previous, host_platform: event.target.value }))}
+            >
+              <option value="windows">Windows</option>
+              <option value="linux">Linux</option>
+              <option value="macos">macOS</option>
+            </select>
           </div>
           <button className="scan-btn" disabled={saving || !form.asset_name} onClick={handleCreate}>
             {saving ? "Creating asset..." : "Create Asset"}
@@ -162,6 +176,8 @@ const Assets = () => {
                 <th>IP</th>
                 <th>Asset Status</th>
                 <th>Agent Status</th>
+                <th>Platform</th>
+                <th>Telemetry</th>
                 <th>Last Activity</th>
               </tr>
             </thead>
@@ -175,6 +191,8 @@ const Assets = () => {
                   <td className="mono-text">{asset.ip_address || "-"}</td>
                   <td>{asset.asset_status || asset.status || "-"}</td>
                   <td>{asset.agent_status}</td>
+                  <td>{asset.host_platform || "-"}</td>
+                  <td>{Array.isArray(asset.telemetry_types) ? asset.telemetry_types.join(", ") || "-" : "-"}</td>
                   <td>{asset.last_activity ? new Date(asset.last_activity).toLocaleString() : "-"}</td>
                 </tr>
               ))}

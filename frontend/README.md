@@ -16,6 +16,12 @@ src/
 ## Environment Setup
 Copy `.env.example` to `.env` and set your backend API URL.
 
+Local ThreatLens default:
+
+```env
+REACT_APP_API_URL=http://localhost:5000/api
+```
+
 ## Run Instructions
 ```bash
 cd frontend
@@ -39,6 +45,7 @@ npm start
 ## Troubleshooting
 - If login/refresh fails, check browser cookies and CORS settings
 - Ensure backend is running and accessible at the API URL
+- If you use `START_ALL.bat`, keep the frontend API URL on port `5000` unless you intentionally changed the backend port
 
 ## Architecture
 

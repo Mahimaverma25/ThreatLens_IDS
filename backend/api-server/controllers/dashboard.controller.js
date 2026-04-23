@@ -4,26 +4,46 @@ const Alert = require("../models/Alerts");
 const Asset = require("../models/Asset");
 const Log = require("../models/Log");
 const { getIdsEngineHealth } = require("../services/detection.service");
+const { getEventStreamHealth } = require("../services/event-stream.service");
+const AgentHeartbeat = require("../models/AgentHeartbeat");
 
 const TIME_WINDOW_HOURS = 24;
 const LIVE_STATUS_WINDOW_MINS = 5;
 const AGENT_STATUS_WINDOW_MINS = 30;
-const DETECTION_ALERT_SOURCES = ["snort", "rule-engine", "ids-engine-ml", "ids-engine"];
+const DETECTION_ALERT_SOURCES = ["snort", "suricata", "rule-engine", "ids-engine-ml", "ids-engine"];
 
 const buildSnortLogMatch = () => ({
-  $or: [{ source: "snort" }, { "metadata.snort": { $exists: true, $ne: null } }]
+  $or: [
+    { source: "snort" },
+    { source: "suricata" },
+    { "metadata.sensorType": { $in: ["snort", "suricata"] } },
+    { "metadata.snort": { $exists: true, $ne: null } }
+  ]
 });
 
 const buildTelemetryLogMatch = () => ({
   $or: [
     { source: "snort" },
+    { source: "suricata" },
+    { source: "host" },
     { source: "agent" },
     { source: "ids-engine" },
     { source: "rule-engine" },
     { source: "ids-engine-ml" },
     { eventType: "snort.alert" },
+    { eventType: { $regex: "^(auth|process|file|service|startup|privilege)\\." } },
     { "metadata.snort": { $exists: true, $ne: null } },
+    { "metadata.host": { $exists: true, $ne: null } },
     { "metadata.idsEngine": { $exists: true, $ne: null } }
+  ]
+});
+
+const buildHostLogMatch = () => ({
+  $or: [
+    { source: "host" },
+    { "metadata.sensorType": "host" },
+    { eventType: { $regex: "^(auth|process|file|service|startup|privilege)\\." } },
+    { "metadata.host": { $exists: true, $ne: null } }
   ]
 });
 
@@ -275,6 +295,11 @@ const normalizeIdsEngineHealth = (idsEngine) => {
       raw?.using_fallback ??
       raw?.fallback ??
       null,
+    algorithm: raw?.algorithm || null,
+    trainedAt: raw?.trainedAt || raw?.trained_at || null,
+    featureNames: Array.isArray(raw?.featureNames || raw?.feature_names)
+      ? raw.featureNames || raw.feature_names
+      : [],
     version: raw?.version || null,
     message: raw?.message || null
   };
@@ -290,6 +315,11 @@ const getStats = async (req, res) => {
     const liveSnortFilter = {
       ...orgFilter,
       ...buildSnortLogMatch()
+    };
+
+    const hostTelemetryFilter = {
+      ...orgFilter,
+      ...buildHostLogMatch()
     };
 
     const telemetryLogFilter = {
@@ -325,9 +355,11 @@ const getStats = async (req, res) => {
       lowAlerts,
       totalTelemetryLogs,
       totalLiveSnortLogs,
+      totalHostLogs,
       latestAlert,
       recentTelemetryLogsRaw,
       recentSnortLogsRaw,
+      recentHostLogsRaw,
       recentAlerts
     ] = await Promise.all([
       Alert.countDocuments(recentAlertFilter),
@@ -337,16 +369,34 @@ const getStats = async (req, res) => {
       Alert.countDocuments({ ...recentAlertFilter, severity: "Low" }),
       Log.countDocuments(telemetryLogFilter),
       Log.countDocuments(liveSnortFilter),
+      Log.countDocuments({
+        ...hostTelemetryFilter,
+        timestamp: recentWindow
+      }),
       Alert.findOne(recentAlertFilter).sort({ timestamp: -1 }),
       Log.find(recentTelemetryFilter).sort({ timestamp: -1 }).limit(500),
       Log.find(recentSnortFilter).sort({ timestamp: -1 }).limit(500),
+      Log.find({
+        ...hostTelemetryFilter,
+        timestamp: recentWindow
+      }).sort({ timestamp: -1 }).limit(500),
       Alert.find(recentAlertFilter).sort({ timestamp: -1 }).limit(200)
     ]);
 
     const recentTelemetryLogs = recentTelemetryLogsRaw.map(normalizeLog);
     const recentSnortLogs = recentSnortLogsRaw.map(normalizeLog);
+    const recentHostLogs = recentHostLogsRaw.map(normalizeLog);
     const recentMlLogs = recentTelemetryLogs.filter((log) =>
       Boolean(log?.metadata?.idsEngine?.is_anomaly)
+    );
+    const recentHostAlerts = recentAlerts.filter((alert) =>
+      ["rule-engine", "ids-engine-ml"].includes(alert.source) &&
+      (alert?.metadata?.category === "host" || alert?.type?.toLowerCase?.().includes("host"))
+    );
+    const sensorDistribution = groupCounts(
+      recentTelemetryLogs,
+      (log) => log?.metadata?.sensorType || log?.source || "unknown",
+      8
     );
     const telemetryCoverage = buildTelemetryCoverage(recentTelemetryLogs);
 
@@ -430,7 +480,8 @@ const getStats = async (req, res) => {
       },
       logs: {
         total: totalTelemetryLogs,
-        snortTotal: totalLiveSnortLogs
+        snortTotal: totalLiveSnortLogs,
+        hostTotal: totalHostLogs
       },
       traffic: {
         eventsLast24h: recentTelemetryLogs.length,
@@ -438,8 +489,11 @@ const getStats = async (req, res) => {
         uniqueDestinationIps,
         avgPriority: averageMetric(recentTelemetryLogs, (log) => log?.derived?.priority),
         liveSnortEventsLast24h: recentSnortLogs.length,
+        hostEventsLast24h: recentHostLogs.length,
         liveSnortAlertsLast24h: recentAlerts.filter((alert) => alert.source === "snort").length,
+        hostAlertsLast24h: recentHostAlerts.length,
         mlAnomaliesLast24h: recentMlLogs.length,
+        sensorDistribution,
         telemetryCoverage
       },
       analytics: {
@@ -474,38 +528,66 @@ const getHealth = async (req, res) => {
 
     const idsEngineRaw = await getIdsEngineHealth();
     const idsEngine = normalizeIdsEngineHealth(idsEngineRaw);
+    const stream = getEventStreamHealth();
 
     const liveSnortFilter = {
       ...orgFilter,
       ...buildSnortLogMatch()
     };
+    const hostTelemetryFilter = {
+      ...orgFilter,
+      ...buildHostLogMatch()
+    };
 
     const [
       lastAlert,
       lastSnortEvent,
+      lastHostEvent,
+      lastHeartbeat,
       liveSnortEventsLast24h,
+      liveHostEventsLast24h,
       liveSnortEventsRecent,
-      recentOnlineAssets
+      liveHostEventsRecent,
+      recentOnlineAssets,
+      recentHeartbeats
     ] = await Promise.all([
       Alert.findOne(orgFilter).sort({ timestamp: -1 }),
       Log.findOne(liveSnortFilter).sort({ timestamp: -1 }),
+      Log.findOne(hostTelemetryFilter).sort({ timestamp: -1 }),
+      AgentHeartbeat.findOne(orgFilter).sort({ receivedAt: -1 }),
       Log.countDocuments({
         ...liveSnortFilter,
+        timestamp: { $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000) }
+      }),
+      Log.countDocuments({
+        ...hostTelemetryFilter,
         timestamp: { $gte: new Date(Date.now() - TIME_WINDOW_HOURS * 60 * 60 * 1000) }
       }),
       Log.countDocuments({
         ...liveSnortFilter,
         timestamp: { $gte: new Date(Date.now() - LIVE_STATUS_WINDOW_MINS * 60 * 1000) }
       }),
+      Log.countDocuments({
+        ...hostTelemetryFilter,
+        timestamp: { $gte: new Date(Date.now() - LIVE_STATUS_WINDOW_MINS * 60 * 1000) }
+      }),
       Asset.countDocuments({
         ...orgFilter,
         agent_status: "online",
         agent_last_seen: { $gte: new Date(Date.now() - AGENT_STATUS_WINDOW_MINS * 60 * 1000) }
-      })
+      }),
+      AgentHeartbeat.countDocuments({
+        ...orgFilter,
+        receivedAt: { $gte: new Date(Date.now() - AGENT_STATUS_WINDOW_MINS * 60 * 1000) }
+      }),
     ]);
 
     const snortStatus =
-      liveSnortEventsRecent > 0 || recentOnlineAssets > 0 || liveSnortEventsLast24h > 0
+      liveSnortEventsRecent > 0 || recentOnlineAssets > 0 || recentHeartbeats > 0 || liveSnortEventsLast24h > 0
+        ? "online"
+        : "offline";
+    const hostStatus =
+      liveHostEventsRecent > 0 || recentHeartbeats > 0 || liveHostEventsLast24h > 0
         ? "online"
         : "offline";
 
@@ -516,16 +598,51 @@ const getHealth = async (req, res) => {
         status: idsEngine.status,
         modelLoaded: idsEngine.modelLoaded,
         usingFallback: idsEngine.usingFallback,
+        algorithm: idsEngine.algorithm,
+        trainedAt: idsEngine.trainedAt,
+        featureNames: idsEngine.featureNames,
         version: idsEngine.version,
         message: idsEngine.message
       },
+      stream,
+      host: {
+        status: hostStatus,
+        lastEventAt: lastHostEvent?.timestamp || null,
+        liveEventsLast24h: liveHostEventsLast24h,
+      },
+      collector: lastHeartbeat
+        ? {
+            status: lastHeartbeat.status || "unknown",
+            lastHeartbeatAt: lastHeartbeat.receivedAt || null,
+            agentType: lastHeartbeat.agent_type || "unknown",
+            hostPlatform: lastHeartbeat.host_platform || "",
+            hostname: lastHeartbeat.hostname || "",
+            queueDepth: lastHeartbeat.queue_depth || 0,
+            telemetryTypes: Array.isArray(lastHeartbeat.telemetry_types)
+              ? lastHeartbeat.telemetry_types
+              : [],
+            assetId: lastHeartbeat._asset_id?.toString?.() || null,
+            metadata: lastHeartbeat.metadata || {}
+          }
+        : {
+            status: recentHeartbeats > 0 ? "online" : "offline",
+            lastHeartbeatAt: null,
+            agentType: null,
+            hostPlatform: "",
+            hostname: "",
+            queueDepth: 0,
+            telemetryTypes: [],
+            assetId: null,
+            metadata: {}
+          },
       snort: {
         status: snortStatus,
         lastEventAt: lastSnortEvent?.timestamp || null,
         liveEventsLast24h: liveSnortEventsLast24h,
-        recentOnlineAssets
+        recentOnlineAssets,
+        recentHeartbeats
       },
-      lastDetectionTime: lastAlert?.timestamp || lastSnortEvent?.timestamp || null
+      lastDetectionTime: lastAlert?.timestamp || lastHostEvent?.timestamp || lastSnortEvent?.timestamp || null
     });
   } catch (error) {
     console.error("dashboard getHealth error:", error);

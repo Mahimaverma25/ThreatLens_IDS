@@ -9,8 +9,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const {
   listAlerts,
   getAlertById,
-  updateAlertStatus,
-  scanAndStore
+  updateAlertStatus
 } = require("../controllers/alerts.controller");
 
 router.get("/", authenticate, authorizeViewer, asyncHandler(listAlerts));
@@ -31,13 +30,6 @@ router.patch(
   ],
   validateRequest,   // ✅ FIXED
   asyncHandler(updateAlertStatus)
-);
-
-router.post(
-  "/scan",
-  authenticate,
-  authorizeAdmin,
-  asyncHandler(scanAndStore)
 );
 
 module.exports = router;

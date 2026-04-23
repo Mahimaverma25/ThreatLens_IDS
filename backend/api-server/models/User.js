@@ -1,5 +1,10 @@
 const mongoose = require("mongoose");
-const { ROLE_ADMIN, ROLE_VIEWER, normalizeRole } = require("../utils/roles");
+const {
+  ROLE_ADMIN,
+  ROLE_ANALYST,
+  ROLE_VIEWER,
+  normalizeRole,
+} = require("../utils/roles");
 
 const UserSchema = new mongoose.Schema({
   _org_id: {
@@ -27,12 +32,12 @@ const UserSchema = new mongoose.Schema({
   passwordHash: {
     type: String,
     required: true,
-    select: false // 🔐 hidden by default
+    select: false
   },
 
   role: {
     type: String,
-    enum: [ROLE_ADMIN, ROLE_VIEWER],
+    enum: [ROLE_ADMIN, ROLE_ANALYST, ROLE_VIEWER],
     default: ROLE_VIEWER,
     trim: true
   },
@@ -47,13 +52,12 @@ const UserSchema = new mongoose.Schema({
   }
 });
 
-// Enforce the single-admin policy at the database level.
+// Enforce a single admin per organization
 UserSchema.index(
-  { role: 1 },
+  { _org_id: 1, role: 1 },
   { unique: true, partialFilterExpression: { role: ROLE_ADMIN } }
 );
 
-/* 🔐 Clean JSON response */
 UserSchema.set("toJSON", {
   transform: (_, ret) => {
     delete ret.passwordHash;
@@ -62,7 +66,6 @@ UserSchema.set("toJSON", {
   }
 });
 
-/* 🔥 Ensure email always lowercase */
 UserSchema.pre("save", function (next) {
   if (this.email) {
     this.email = this.email.toLowerCase();

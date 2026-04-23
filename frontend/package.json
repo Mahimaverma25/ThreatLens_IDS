@@ -21,7 +21,9 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "node scripts/run-react-build.js",
+    "build:standard": "react-scripts build",
+    "build:verify": "node scripts/run-react-build.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

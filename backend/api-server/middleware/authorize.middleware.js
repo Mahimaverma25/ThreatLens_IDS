@@ -1,5 +1,10 @@
 const Log = require("../models/Log");
-const { ROLE_ADMIN, ROLE_VIEWER, normalizeRole } = require("../utils/roles");
+const {
+  ROLE_ADMIN,
+  ROLE_ANALYST,
+  ROLE_VIEWER,
+  normalizeRole,
+} = require("../utils/roles");
 
 const authorize = (roles = []) => async (req, res, next) => {
   if (!req.user) {
@@ -34,8 +39,10 @@ const authorize = (roles = []) => async (req, res, next) => {
 };
 
 const authorizeAdmin = authorize([ROLE_ADMIN]);
-const authorizeViewer = authorize([ROLE_ADMIN, ROLE_VIEWER]);
+const authorizeAnalyst = authorize([ROLE_ADMIN, ROLE_ANALYST]);
+const authorizeViewer = authorize([ROLE_ADMIN, ROLE_ANALYST, ROLE_VIEWER]);
 
 module.exports = authorize;
 module.exports.authorizeAdmin = authorizeAdmin;
+module.exports.authorizeAnalyst = authorizeAnalyst;
 module.exports.authorizeViewer = authorizeViewer;

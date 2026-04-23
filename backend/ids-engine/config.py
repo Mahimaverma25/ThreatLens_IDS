@@ -10,8 +10,15 @@ class Config:
         "IDS_ENGINE_MODEL_PATH",
         os.path.join(os.path.dirname(__file__), "models", "attack_model.pkl"),
     )
+    RF_MODEL_PATH = os.environ.get(
+        "IDS_ENGINE_RF_MODEL_PATH",
+        os.path.join(os.path.dirname(__file__), "models", "rf_model.pkl"),
+    )
+    SVM_MODEL_PATH = os.environ.get(
+        "IDS_ENGINE_SVM_MODEL_PATH",
+        os.path.join(os.path.dirname(__file__), "models", "svm_model.pkl"),
+    )
     ENABLE_ANOMALY_DETECTION = os.environ.get("IDS_ENGINE_ENABLE_ANOMALY", "true").lower() == "true"
-    ENABLE_DEMO_SCAN = os.environ.get("IDS_ENGINE_ENABLE_DEMO_SCAN", "false").lower() == "true"
     MAX_BATCH_SIZE = int(os.environ.get("IDS_ENGINE_MAX_BATCH_SIZE", "500"))
 
     LOG_LEVEL = os.environ.get("IDS_ENGINE_LOG_LEVEL", os.environ.get("LOG_LEVEL", "INFO"))

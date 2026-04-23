@@ -12,6 +12,18 @@ const Login = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  const formatLoginError = (err) => {
+    if (err?.response?.data?.message) {
+      return err.response.data.message;
+    }
+
+    if (err?.message === "Network Error") {
+      return "Unable to reach the ThreatLens API. Make sure the backend is running and that local ports 5000-5005 are available.";
+    }
+
+    return err?.message || "Login failed. Please try again.";
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -32,11 +44,7 @@ const Login = () => {
       }
     } catch (err) {
       console.error("Login error:", err);
-      setError(
-        err?.response?.data?.message ||
-        err?.message ||
-        "Login failed. Please try again."
-      );
+      setError(formatLoginError(err));
     } finally {
       setLoading(false);
     }

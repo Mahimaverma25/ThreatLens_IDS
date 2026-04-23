@@ -1,22 +1,5 @@
 const Alert = require("../models/Alerts");
-const Log = require("../models/Log");
-const config = require("../config/env");
-const { createAlert, updateAlert } = require("../services/alert.service");
-const { requestIdsScan } = require("../services/detection.service");
-
-const severityToConfidence = {
-	Critical: 0.95,
-	High: 0.84,
-	Medium: 0.66,
-	Low: 0.44
-};
-
-const severityToRiskScore = {
-	Critical: 94,
-	High: 78,
-	Medium: 59,
-	Low: 36
-};
+const { updateAlert } = require("../services/alert.service");
 
 const listAlerts = async (req, res) => {
 	try {
@@ -113,48 +96,4 @@ const updateAlertStatus = async (req, res) => {
 	}
 };
 
-const scanAndStore = async (req, res) => {
-	try {
-		if (!config.allowSyntheticTraffic) {
-			return res.status(403).json({
-				message: "Synthetic IDS scans are disabled. Use the live Snort agent for real-time alerts."
-			});
-		}
-
-		const alerts = await requestIdsScan(12);
-		const stored = [];
-		for (const alert of alerts) {
-			// CRITICAL: Add _org_id to log and alert
-			const log = await Log.create({
-				_org_id: req.orgId,
-				message: `IDS scan detected ${alert.type}`,
-				level: "warn",
-				source: "ids-engine",
-				ip: alert.ip,
-				eventType: "ids.alert",
-				metadata: alert
-			});
-
-			const created = await createAlert({
-				_org_id: req.orgId,
-				attackType: alert.type,
-				type: alert.type,
-				ip: alert.ip,
-				severity: alert.severity || "Medium",
-				confidence: alert.confidence ?? severityToConfidence[alert.severity || "Medium"] ?? 0.5,
-				risk_score: alert.risk_score ?? severityToRiskScore[alert.severity || "Medium"] ?? 50,
-				relatedLogs: [log._id],
-				source: "ids-engine"
-			});
-
-			stored.push(created);
-		}
-
-		return res.json({ data: stored });
-	} catch (error) {
-		console.error("[Scan Store Error]", error);
-		return res.status(502).json({ message: "IDS engine unavailable" });
-	}
-};
-
-module.exports = { listAlerts, getAlertById, updateAlertStatus, scanAndStore };
+module.exports = { listAlerts, getAlertById, updateAlertStatus };

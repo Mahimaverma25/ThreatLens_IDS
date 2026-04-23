@@ -10,7 +10,7 @@ const normalizeUserRole = (user) => {
 
   return {
     ...user,
-    role: user.role === "admin" ? "admin" : "viewer",
+    role: ["admin", "analyst", "viewer"].includes(user.role) ? user.role : "viewer",
   };
 };
 
@@ -39,7 +39,7 @@ export const AuthProvider = ({ children }) => {
 
       try {
         const meRes = await authApi.me();
-        const normalizedUser = normalizeUserRole(meRes.data.user);
+        const normalizedUser = normalizeUserRole(meRes.data.user || meRes.data.data);
         setUser(normalizedUser);
         localStorage.setItem("user", JSON.stringify(normalizedUser));
       } catch (err) {
@@ -50,7 +50,7 @@ export const AuthProvider = ({ children }) => {
           localStorage.setItem("accessToken", newToken);
 
           const meRes = await authApi.me();
-          const normalizedUser = normalizeUserRole(meRes.data.user);
+          const normalizedUser = normalizeUserRole(meRes.data.user || meRes.data.data);
           setUser(normalizedUser);
           localStorage.setItem("user", JSON.stringify(normalizedUser));
         } catch (refreshErr) {

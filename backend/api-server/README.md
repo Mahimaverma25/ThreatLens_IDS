@@ -1,21 +1,24 @@
 # ThreatLens API Server
 
-This service is the live backend for ThreatLens.
+This service is the live backend for ThreatLens. It keeps the existing Express/MongoDB architecture and upgrades it into a real-time security monitoring backend.
 
-## Main Responsibilities
+## Responsibilities
 
 - authenticate dashboard users with JWT + refresh cookies
-- authenticate agents with API key + signed ingest requests
-- store logs and alerts in MongoDB
-- run the local rule engine
-- call the Python IDS engine for ML analysis
-- emit Socket.io updates to the correct organization room
+- authenticate collectors with API key + HMAC signatures
+- receive batched telemetry on `POST /api/logs/ingest`
+- normalize and store logs in MongoDB
+- trigger rule-based and ML-assisted detections
+- publish real-time events through Socket.IO
+- publish durable stream events through Redis Streams when Redis is configured
+- expose dashboard, incidents, intel, reports, and health APIs
 
-## Important Live Route
+## Active Routes
 
-`POST /api/logs/ingest`
-
-This is the real ingest path used by the Snort agent.
+- `POST /api/logs/ingest`
+- `POST /api/agents/heartbeat`
+- `GET /health`
+- `GET /api/dashboard/health`
 
 ## Start
 
@@ -26,6 +29,15 @@ npm install
 npm start
 ```
 
+For a full local run, create collector credentials after the API starts:
+
+```powershell
+node setup-dev-keys.js
+```
+
+That syncs `THREATLENS_API_URL`, `THREATLENS_API_KEY`, `THREATLENS_API_SECRET`, and `ASSET_ID`
+into `backend/collector/.env`.
+
 ## Key Environment Variables
 
 ```env
@@ -35,35 +47,53 @@ JWT_SECRET=change-this
 REFRESH_TOKEN_SECRET=change-this-too
 IDS_ENGINE_URL=http://localhost:8000
 ENABLE_IDS_ANALYSIS=true
-ALLOW_SYNTHETIC_TRAFFIC=false
+INTEGRATION_API_KEY=shared-secret
+REDIS_URL=redis://127.0.0.1:6379
+REDIS_STREAM_KEY=threatlens:events
 ```
 
-## Health
+## Health Checks
 
 - `GET /health`
 - `GET /api/dashboard/health`
 
-The dashboard health route includes:
+`/api/dashboard/health` includes:
 
-- database connectivity
-- IDS engine status
-- Snort live status for the current organization
+- MongoDB connection status
+- IDS engine reachability and model status
+- stream mode and last publish state
+- recent sensor/agent heartbeat status
+
+## Verification
+
+```powershell
+node --check server.js
+node --check controllers\logs.controller.js
+node --check controllers\dashboard.controller.js
+```
 
 ## Troubleshooting
 
-### Agent ingest fails with `401`
+### Collector ingest fails with `401`
 
-- the token or secret is wrong
-- the timestamp is too far from server time
-- the `ASSET_ID` does not match the API key’s asset
+- regenerate credentials with `node setup-dev-keys.js`
+- confirm `ASSET_ID` matches the API key's asset
+- confirm clocks are in sync for HMAC timestamp validation
+
+### Redis is unavailable
+
+- the API falls back to in-memory streaming
+- live Socket.IO updates still work
+- durable replay/fan-out will be unavailable until Redis is reachable
 
 ### Logs arrive but no alerts appear
 
-- check MongoDB `Log` documents first
-- then check whether the log source is `snort`
-- then check `metadata.idsEngine` or rule-engine alert creation
+- confirm `Log` documents are being inserted first
+- confirm `metadata.sensorType` and `source` are normalized correctly
+- check `metadata.idsEngine` for ML analysis output
 
 ### Sockets connect but pages do not update
 
-- verify the JWT includes the correct organization
-- verify the user belongs to the same organization as the ingested asset
+- confirm the JWT belongs to the same organization as the ingested asset
+- confirm Socket.IO auth is sending the access token
+- confirm `CORS_ORIGIN` matches the frontend origin

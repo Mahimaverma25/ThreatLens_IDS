@@ -1,48 +1,40 @@
 import { useEffect, useMemo, useState } from "react";
 import MainLayout from "../layout/MainLayout";
-import { alerts } from "../services/api";
-
-const playbooks = [
-  { id: "block-ip", name: "Block IP", note: "Contain malicious source at firewall or WAF edge.", status: "Investigating" },
-  { id: "disable-user", name: "Disable User", note: "Suspend suspicious account activity pending review.", status: "Investigating" },
-  { id: "quarantine-asset", name: "Quarantine Asset", note: "Isolate impacted host from production network.", status: "Investigating" },
-  { id: "mark-false-positive", name: "Mark False Positive", note: "Close noisy detection after analyst validation.", status: "False Positive" }
-];
+import { alerts, playbooks } from "../services/api";
 
 const ResponsePlaybooks = () => {
   const [alertList, setAlertList] = useState([]);
+  const [playbookList, setPlaybookList] = useState([]);
+  const [history, setHistory] = useState([]);
   const [selectedAlertId, setSelectedAlertId] = useState("");
-  const [history, setHistory] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("threatlens-playbook-history") || "[]");
-    } catch {
-      return [];
-    }
-  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    localStorage.setItem("threatlens-playbook-history", JSON.stringify(history));
-  }, [history]);
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const [alertsResponse, playbooksResponse] = await Promise.all([
+        alerts.list(100, 1),
+        playbooks.list(),
+      ]);
+      const list = alertsResponse?.data?.data ?? [];
+      const playbookData = playbooksResponse?.data?.data?.playbooks ?? [];
+      const executions = playbooksResponse?.data?.data?.executions ?? [];
+      setAlertList(list);
+      setPlaybookList(playbookData);
+      setHistory(executions);
+      setSelectedAlertId((current) => current || list[0]?._id || "");
+    } catch (fetchError) {
+      console.error("Playbook load error:", fetchError);
+      setError("Failed to load response playbooks");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        setLoading(true);
-        const response = await alerts.list(100, 1);
-        const list = response?.data?.data ?? [];
-        setAlertList(list);
-        setSelectedAlertId(list[0]?._id || "");
-      } catch (fetchError) {
-        console.error("Playbook alerts error:", fetchError);
-        setError("Failed to load alerts");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAlerts();
+    loadData();
   }, []);
 
   const selectedAlert = useMemo(
@@ -54,21 +46,12 @@ const ResponsePlaybooks = () => {
     if (!selectedAlertId) return;
 
     try {
-      await alerts.update(selectedAlertId, {
-        status: playbook.status,
-        note: `${playbook.name}: ${playbook.note}`
+      setError("");
+      await playbooks.execute({
+        alertId: selectedAlertId,
+        playbookId: playbook.id,
       });
-
-      setHistory((current) => [
-        {
-          id: Date.now(),
-          playbook: playbook.name,
-          alertType: selectedAlert?.type,
-          ip: selectedAlert?.ip,
-          timestamp: new Date().toISOString()
-        },
-        ...current
-      ]);
+      await loadData();
     } catch (runError) {
       console.error("Playbook run error:", runError);
       setError("Failed to execute playbook action");
@@ -89,7 +72,7 @@ const ResponsePlaybooks = () => {
         <div>
           <div className="command-eyebrow">ThreatLens / Response orchestration / analyst actions</div>
           <h1>Response Playbooks</h1>
-          <p>Run consistent analyst actions against live alerts and maintain a lightweight execution history.</p>
+          <p>Run backend-tracked analyst actions against live alerts and maintain an execution history.</p>
         </div>
       </section>
 
@@ -123,7 +106,7 @@ const ResponsePlaybooks = () => {
             <span>Operational response templates</span>
           </div>
           <div className="panel-list">
-            {playbooks.map((playbook) => (
+            {playbookList.map((playbook) => (
               <div key={playbook.id} className="list-row list-row-stack">
                 <div>
                   <strong>{playbook.name}</strong>
@@ -140,17 +123,19 @@ const ResponsePlaybooks = () => {
         <div className="dashboard-panel">
           <div className="panel-header">
             <h3>Execution History</h3>
-            <span>Local analyst runbook trail</span>
+            <span>Backend-tracked analyst runbook trail</span>
           </div>
           <div className="panel-list">
             {history.length > 0 ? (
               history.map((entry) => (
-                <div key={entry.id} className="list-row list-row-stack">
+                <div key={entry._id} className="list-row list-row-stack">
                   <div>
-                    <strong>{entry.playbook}</strong>
-                    <div className="list-meta">{entry.alertType} / {entry.ip}</div>
+                    <strong>{entry.playbook_name}</strong>
+                    <div className="list-meta">
+                      {entry.metadata?.alertType || entry.alert_id?.type} / {entry.metadata?.ip || entry.alert_id?.ip}
+                    </div>
                   </div>
-                  <span>{new Date(entry.timestamp).toLocaleString()}</span>
+                  <span>{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "-"}</span>
                 </div>
               ))
             ) : (

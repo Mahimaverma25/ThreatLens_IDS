@@ -2,21 +2,21 @@ export const navigationSections = [
   {
     title: "Overview",
     items: [
-      { label: "Dashboard", path: "/dashboard", shortLabel: "DB", roles: ["admin", "viewer"] },
-      { label: "Alerts", path: "/alerts", shortLabel: "AL", roles: ["admin", "viewer"] },
-      { label: "Logs", path: "/logs", shortLabel: "LG", roles: ["admin", "viewer"] },
-      { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "viewer"] },
-      { label: "Threat Map", path: "/threat-map", shortLabel: "TM", roles: ["admin", "viewer"] }
+      { label: "Dashboard", path: "/dashboard", shortLabel: "DB", roles: ["admin", "analyst", "viewer"] },
+      { label: "Alerts", path: "/alerts", shortLabel: "AL", roles: ["admin", "analyst", "viewer"] },
+      { label: "Logs", path: "/logs", shortLabel: "LG", roles: ["admin", "analyst", "viewer"] },
+      { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "analyst", "viewer"] },
+      { label: "Threat Map", path: "/threat-map", shortLabel: "TM", roles: ["admin", "analyst", "viewer"] }
     ]
   },
   {
     title: "Detection",
     items: [
-      { label: "Incidents", path: "/incidents", shortLabel: "IN", roles: ["admin"] },
+      { label: "Incidents", path: "/incidents", shortLabel: "IN", roles: ["admin", "analyst"] },
       { label: "Assets", path: "/assets", shortLabel: "AS", roles: ["admin"] },
-      { label: "Rules", path: "/rules", shortLabel: "RL", roles: ["admin"] },
+      { label: "Rules", path: "/rules", shortLabel: "RL", roles: ["admin", "analyst", "viewer"] },
       { label: "Threat Intel", path: "/threat-intel", shortLabel: "TI", roles: ["admin"] },
-      { label: "Model Health", path: "/model-health", shortLabel: "MH", roles: ["admin"] }
+      { label: "Model Health", path: "/model-health", shortLabel: "MH", roles: ["admin", "analyst"] }
     ]
   },
   {

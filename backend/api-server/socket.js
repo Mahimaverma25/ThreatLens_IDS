@@ -2,6 +2,13 @@ let ioInstance;
 
 const orgRoom = (orgId) => `org:${orgId}`;
 const roleRoom = (role) => `role:${role}`;
+const shouldLogSocketEvents = process.env.LOG_SOCKET_EVENTS === "true";
+
+const logSocketEvent = (message) => {
+  if (shouldLogSocketEvents) {
+    console.log(message);
+  }
+};
 
 const initSocket = (httpServer) => {
   const { Server } = require("socket.io");
@@ -23,7 +30,7 @@ const initSocket = (httpServer) => {
       socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
 
     if (!token) {
-      console.log("❌ Socket auth failed: missing token");
+      logSocketEvent("Socket auth failed: missing token");
       return next(new Error("Unauthorized"));
     }
 
@@ -36,20 +43,24 @@ const initSocket = (httpServer) => {
         orgId: payload.orgId || payload._org_id || null,
       };
 
-      console.log(
-        `✅ Socket authenticated | role=${socket.user.role} | org=${socket.user.orgId || "none"}`
+      logSocketEvent(
+        `Socket authenticated | role=${socket.user.role} | org=${
+          socket.user.orgId || "none"
+        }`
       );
 
       return next();
     } catch (error) {
-      console.log("❌ Socket auth failed: invalid token");
+      logSocketEvent("Socket auth failed: invalid token");
       return next(new Error("Unauthorized"));
     }
   });
 
   ioInstance.on("connection", (socket) => {
-    console.log(
-      `🔌 Socket connected | id=${socket.id} | role=${socket.user.role} | org=${socket.user.orgId || "none"}`
+    logSocketEvent(
+      `Socket connected | id=${socket.id} | role=${socket.user.role} | org=${
+        socket.user.orgId || "none"
+      }`
     );
 
     socket.join(roleRoom(socket.user.role));
@@ -65,7 +76,7 @@ const initSocket = (httpServer) => {
     });
 
     socket.on("disconnect", (reason) => {
-      console.log(`⚠️ Socket disconnected | id=${socket.id} | reason=${reason}`);
+      logSocketEvent(`Socket disconnected | id=${socket.id} | reason=${reason}`);
     });
   });
 
@@ -81,40 +92,40 @@ const getIo = () => {
 
 const emitToOrganization = (orgId, eventName, payload = {}) => {
   if (!orgId) {
-    console.log(`⚠️ Skipped emit: missing orgId for event "${eventName}"`);
+    logSocketEvent(`Skipped emit: missing orgId for event "${eventName}"`);
     return;
   }
 
   try {
     const room = orgRoom(orgId.toString());
     getIo().to(room).emit(eventName, payload);
-    console.log(`📡 Emitted "${eventName}" to ${room}`);
+    logSocketEvent(`Emitted "${eventName}" to ${room}`);
   } catch (error) {
-    console.log(`❌ Failed to emit "${eventName}" to org ${orgId}: ${error.message}`);
+    logSocketEvent(`Failed to emit "${eventName}" to org ${orgId}: ${error.message}`);
   }
 };
 
 const emitToRole = (role, eventName, payload = {}) => {
   if (!role) {
-    console.log(`⚠️ Skipped emit: missing role for event "${eventName}"`);
+    logSocketEvent(`Skipped emit: missing role for event "${eventName}"`);
     return;
   }
 
   try {
     const room = roleRoom(role);
     getIo().to(room).emit(eventName, payload);
-    console.log(`📡 Emitted "${eventName}" to ${room}`);
+    logSocketEvent(`Emitted "${eventName}" to ${room}`);
   } catch (error) {
-    console.log(`❌ Failed to emit "${eventName}" to role ${role}: ${error.message}`);
+    logSocketEvent(`Failed to emit "${eventName}" to role ${role}: ${error.message}`);
   }
 };
 
 const emitGlobal = (eventName, payload = {}) => {
   try {
     getIo().emit(eventName, payload);
-    console.log(`📡 Emitted global event "${eventName}"`);
+    logSocketEvent(`Emitted global event "${eventName}"`);
   } catch (error) {
-    console.log(`❌ Failed to emit global event "${eventName}": ${error.message}`);
+    logSocketEvent(`Failed to emit global event "${eventName}": ${error.message}`);
   }
 };
 

@@ -9,7 +9,15 @@ const { v4: uuidv4 } = require("uuid");
  */
 const createAsset = async (req, res) => {
   try {
-    const { asset_name, asset_type, asset_criticality, hostname, ip_address } = req.body;
+    const {
+      asset_name,
+      asset_type,
+      asset_criticality,
+      hostname,
+      ip_address,
+      host_platform,
+      telemetry_types,
+    } = req.body;
 
     if (!asset_name || !asset_type) {
       return res.status(400).json({ message: "asset_name and asset_type are required" });
@@ -25,6 +33,8 @@ const createAsset = async (req, res) => {
       asset_criticality: asset_criticality || "medium",
       hostname: hostname || asset_name,
       ip_address: ip_address || null,
+      host_platform: host_platform || "",
+      telemetry_types: Array.isArray(telemetry_types) ? telemetry_types : [],
       _org_id: req.orgId,
       status: "active",
       agent_status: "offline",
@@ -68,6 +78,8 @@ const createAsset = async (req, res) => {
         ip_address: asset.ip_address,
         asset_status: asset.status,
         agent_status: asset.agent_status,
+        host_platform: asset.host_platform,
+        telemetry_types: asset.telemetry_types || [],
         created_at: asset.created_at
       }
     });
@@ -104,6 +116,8 @@ const listAssets = async (req, res) => {
         ip_address: asset.ip_address,
         asset_status: asset.status,
         agent_status: asset.agent_status,
+        host_platform: asset.host_platform,
+        telemetry_types: asset.telemetry_types || [],
         last_activity: asset.agent_last_seen,
         created_at: asset.created_at
       })),
@@ -142,6 +156,8 @@ const getAsset = async (req, res) => {
       ip_address: asset.ip_address,
       asset_status: asset.status,
       agent_status: asset.agent_status,
+      host_platform: asset.host_platform,
+      telemetry_types: asset.telemetry_types || [],
       baseline: asset.baseline,
       suppression_rules: asset.suppression_rules,
       last_activity: asset.agent_last_seen,
@@ -161,7 +177,16 @@ const getAsset = async (req, res) => {
 const updateAsset = async (req, res) => {
   try {
     const { id } = req.params;
-    const { asset_name, asset_criticality, hostname, ip_address, asset_status, status } = req.body;
+    const {
+      asset_name,
+      asset_criticality,
+      hostname,
+      ip_address,
+      asset_status,
+      status,
+      host_platform,
+      telemetry_types,
+    } = req.body;
 
     const updates = {};
     if (asset_name) updates.asset_name = asset_name;
@@ -170,6 +195,8 @@ const updateAsset = async (req, res) => {
     if (ip_address !== undefined) updates.ip_address = ip_address;
     if (asset_status) updates.status = asset_status;
     if (status) updates.status = status;
+    if (host_platform !== undefined) updates.host_platform = host_platform;
+    if (telemetry_types !== undefined) updates.telemetry_types = telemetry_types;
 
     const asset = await Asset.findOneAndUpdate(
       { _id: id, _org_id: req.orgId },
@@ -205,7 +232,9 @@ const updateAsset = async (req, res) => {
         hostname: asset.hostname,
         ip_address: asset.ip_address,
         asset_status: asset.status,
-        agent_status: asset.agent_status
+        agent_status: asset.agent_status,
+        host_platform: asset.host_platform,
+        telemetry_types: asset.telemetry_types || []
       }
     });
   } catch (error) {

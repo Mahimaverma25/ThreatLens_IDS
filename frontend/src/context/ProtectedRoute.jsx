@@ -8,8 +8,7 @@ const normalizeRole = (role) => {
 
   const value = String(role).toLowerCase().trim();
 
-  // Backward compatibility
-  if (value === "viewer") return "analyst";
+  if (value === "user") return "analyst";
 
   return value;
 };

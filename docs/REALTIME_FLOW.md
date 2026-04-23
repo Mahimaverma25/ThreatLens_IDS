@@ -1,10 +1,22 @@
 # ThreatLens Real-Time Flow
 
-1. Snort writes alerts to `alert_fast.txt` and/or `eve.json`.
-2. `backend/agent/realtime-agent.js` tails those files and parses every new alert.
-3. The agent signs the payload with `x-api-key`, `x-api-secret`, `x-timestamp`, and `x-signature`.
-4. `POST /api/logs/ingest` stores logs in MongoDB.
-5. The backend enriches each log with optional ML output from the Python IDS engine.
-6. Rule detection and Snort-derived alerting create/update alert documents.
-7. Socket.io emits normalized `logs:new`, `alerts:new`, and `alerts:update` events.
-8. The React dashboard refreshes logs, alerts, and health panels.
+1. Snort and/or Suricata writes alerts to fast-alert or `eve.json` outputs.
+2. `backend/agent/realtime-agent.js` tails those files and normalizes each event.
+3. The collector signs every batch with API key + HMAC headers.
+4. `POST /api/logs/ingest` validates the batch and stores logs in MongoDB.
+5. The backend runs:
+   - normalization
+   - deduplication
+   - rule evaluation
+   - ML enrichment through `backend/ids-engine`
+6. New telemetry batches publish to:
+   - Socket.IO organization rooms for live UI updates
+   - Redis Streams when `REDIS_URL` is configured
+7. Alerts, incidents, dashboard counters, agent heartbeats, and health states are updated.
+8. The React frontend receives:
+   - `logs:new`
+   - `alerts:new`
+   - `dashboard:update`
+   - `agents:heartbeat`
+   - `health:update`
+   - `stream:event`

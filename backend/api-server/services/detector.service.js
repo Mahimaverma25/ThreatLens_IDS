@@ -12,7 +12,7 @@ const severityProfiles = {
 const telemetryWindowStart = () =>
   new Date(Date.now() - config.alertCorrelationWindowMins * 60 * 1000);
 
-const TELEMETRY_SOURCES = new Set(["agent", "upload", "ids-engine", "snort", "request"]);
+const TELEMETRY_SOURCES = new Set(["agent", "upload", "ids-engine", "snort", "suricata", "request"]);
 
 const isTelemetryLog = (log) => TELEMETRY_SOURCES.has(log.source);
 const WEB_PORTS = new Set([80, 443, 3000, 5000, 8000, 8080, 8443]);
@@ -33,6 +33,7 @@ const normalizeTelemetryValue = (value) => {
 const getMessageText = (log) =>
   String(
     log?.metadata?.snort?.message ||
+      log?.metadata?.ids?.signature ||
       log?.metadata?.attackType ||
       log?.message ||
       ""
@@ -58,6 +59,10 @@ const getEndpointText = (log) =>
   String(log?.endpoint || log?.metadata?.endpoint || "").toLowerCase();
 
 const includesAny = (value, patterns = []) => patterns.some((pattern) => value.includes(pattern));
+const getSensorType = (log) =>
+  String(log?.metadata?.sensorType || log?.source || "")
+    .trim()
+    .toLowerCase();
 
 const buildAlertMetadataFromLog = (log, metadata = {}) => {
   const snort = log?.metadata?.snort || {};
@@ -334,7 +339,7 @@ const evaluateMalwareBeaconing = async (log) => {
 
   if (
     !includesAny(message, ["beacon", "trojan", "malware", "c2", "command and control"]) &&
-    !(flowCount >= 10 && bytes >= 15000 && log?.source === "snort")
+    !(flowCount >= 10 && bytes >= 15000 && ["snort", "suricata"].includes(getSensorType(log)))
   ) {
     return null;
   }
@@ -392,6 +397,164 @@ const evaluateUnauthorizedAdminAccess = async (log) => {
     attackType: "Unauthorized Admin Access",
     severity: "Critical",
     source: "rule-engine",
+  });
+};
+
+const evaluateSuspiciousProcessCreation = async (log) => {
+  if (log.eventType !== "process.start") {
+    return null;
+  }
+
+  const processName = String(
+    log?.metadata?.host?.processName ||
+      log?.metadata?.processName ||
+      log?.message ||
+      ""
+  ).toLowerCase();
+
+  const suspiciousPatterns = [
+    "powershell",
+    "cmd.exe",
+    "wmic",
+    "rundll32",
+    "regsvr32",
+    "mimikatz",
+    "psexec",
+    "/bin/sh",
+    "/bin/bash",
+    "nc ",
+    "ncat",
+  ];
+
+  if (!includesAny(processName, suspiciousPatterns)) {
+    return null;
+  }
+
+  return createDetectionAlert({
+    log,
+    attackType: "Suspicious Process Creation",
+    severity: "High",
+    source: "rule-engine",
+    metadata: {
+      category: "host",
+      family: "process-execution",
+      processName: log?.metadata?.host?.processName || log?.metadata?.processName || null,
+      commandLine: log?.metadata?.host?.commandLine || null,
+    },
+  });
+};
+
+const evaluateSensitiveFileChange = async (log) => {
+  if (log.eventType !== "file.change") {
+    return null;
+  }
+
+  const filePath = String(
+    log?.metadata?.host?.filePath || log?.metadata?.filePath || ""
+  ).toLowerCase();
+
+  if (
+    !includesAny(filePath, [
+      "system32",
+      "\\startup",
+      "/etc/passwd",
+      "/etc/shadow",
+      "/etc/sudoers",
+      ".ssh",
+      "authorized_keys",
+      "windows\\tasks",
+      "cron",
+    ])
+  ) {
+    return null;
+  }
+
+  return createDetectionAlert({
+    log,
+    attackType: "Sensitive File Integrity Change",
+    severity: "High",
+    source: "rule-engine",
+    metadata: {
+      category: "host",
+      family: "file-integrity",
+      filePath: log?.metadata?.host?.filePath || log?.metadata?.filePath || null,
+      action: log?.metadata?.host?.action || log?.metadata?.action || null,
+    },
+  });
+};
+
+const evaluatePrivilegeEscalation = async (log) => {
+  const elevated =
+    Boolean(log?.metadata?.host?.elevated) ||
+    log.eventType === "privilege.escalation";
+
+  if (!elevated) {
+    return null;
+  }
+
+  return createDetectionAlert({
+    log,
+    attackType: "Privilege Escalation Indicator",
+    severity: "Critical",
+    source: "rule-engine",
+    metadata: {
+      category: "host",
+      family: "privilege-escalation",
+      userName: log?.metadata?.host?.userName || null,
+      processName: log?.metadata?.host?.processName || null,
+    },
+  });
+};
+
+const evaluatePersistenceChange = async (log) => {
+  if (!["service.change", "startup.persistence"].includes(log.eventType)) {
+    return null;
+  }
+
+  return createDetectionAlert({
+    log,
+    attackType: "Persistence / Service Modification",
+    severity: "High",
+    source: "rule-engine",
+    metadata: {
+      category: "host",
+      family: "persistence",
+      serviceName: log?.metadata?.host?.serviceName || null,
+      startupEntry: log?.metadata?.host?.startupEntry || null,
+    },
+  });
+};
+
+const evaluateHostLoginFailures = async (log) => {
+  if (log.eventType !== "auth.login" || log?.metadata?.host?.loginSuccess !== false) {
+    return null;
+  }
+
+  const userName = log?.metadata?.host?.userName || null;
+
+  const failures = await Log.countDocuments({
+    _org_id: log._org_id,
+    eventType: "auth.login",
+    "metadata.host.loginSuccess": false,
+    ...(userName ? { "metadata.host.userName": userName } : {}),
+    timestamp: { $gte: telemetryWindowStart() },
+  });
+
+  if (failures < config.bruteforceThreshold) {
+    return null;
+  }
+
+  return createDetectionAlert({
+    log,
+    attackType: "Host Authentication Brute Force",
+    severity: "High",
+    source: "rule-engine",
+    metadata: {
+      category: "host",
+      family: "authentication",
+      userName,
+      failureCount: failures,
+    },
   });
 };
 
@@ -551,16 +714,18 @@ const getSnortSeverity = (priority) => {
   return "Low";
 };
 
-const evaluateSnortAlert = async (log) => {
-  if (log.source !== "snort" || log.eventType !== "snort.alert") {
+const evaluateIdsAlert = async (log) => {
+  const sensorType = getSensorType(log);
+  if (!["snort", "suricata"].includes(sensorType) || !String(log.eventType || "").endsWith(".alert")) {
     return null;
   }
 
   const attackType =
     log.metadata?.snort?.message ||
+    log.metadata?.ids?.signature ||
     log.metadata?.attackType ||
     log.message ||
-    "Snort Alert";
+    "IDS Alert";
   const severity = getSnortSeverity(log.metadata?.snort?.priority);
 
   return createDetectionAlert({
@@ -568,13 +733,69 @@ const evaluateSnortAlert = async (log) => {
     attackType,
     type: attackType,
     severity,
-    source: "snort",
+    source: sensorType,
   });
 };
 
-const evaluateLog = async (log) =>
-  Promise.all([
-    evaluateSnortAlert(log),
+const Rule = require("../models/Rule");
+
+const evaluateDynamicRules = async (log) => {
+  if (!isTelemetryLog(log)) return [];
+
+  const rules = await Rule.find({ _org_id: log._org_id, enabled: true });
+  const results = [];
+
+  for (const rule of rules) {
+    let match = rule.logic === "OR" ? false : true;
+
+    for (const condition of rule.conditions) {
+      const { field, operator, value } = condition;
+      
+      // Basic field extraction (handle nested metadata)
+      let fieldValue = field.startsWith("metadata.") 
+        ? log.metadata?.[field.split(".")[1]] 
+        : log[field];
+      
+      if (fieldValue === undefined) fieldValue = null;
+
+      let conditionMet = false;
+      switch (operator) {
+        case "equals": conditionMet = String(fieldValue) === String(value); break;
+        case "not_equals": conditionMet = String(fieldValue) !== String(value); break;
+        case "contains": conditionMet = String(fieldValue || "").toLowerCase().includes(String(value).toLowerCase()); break;
+        case "greater_than": conditionMet = Number(fieldValue) > Number(value); break;
+        case "less_than": conditionMet = Number(fieldValue) < Number(value); break;
+        case "exists": conditionMet = fieldValue !== null; break;
+      }
+
+      if (rule.logic === "OR") {
+        if (conditionMet) { match = true; break; }
+      } else {
+        if (!conditionMet) { match = false; break; }
+      }
+    }
+
+    if (match && rule.conditions.length > 0) {
+      results.push(createDetectionAlert({
+        log,
+        attackType: rule.alertType || rule.name,
+        severity: rule.severity,
+        source: "dynamic-rules",
+        metadata: { ruleId: rule._id, ruleName: rule.name }
+      }));
+      
+      rule.hitCount = (rule.hitCount || 0) + 1;
+      rule.lastTriggered = new Date();
+      await rule.save();
+    }
+  }
+
+  return results;
+};
+
+const evaluateLog = async (log) => {
+  const tasks = [
+    evaluateIdsAlert(log),
     evaluateBruteForce(log),
     evaluateUnauthorizedAdminAccess(log),
     evaluateDosBurst(log),
@@ -591,7 +812,15 @@ const evaluateLog = async (log) =>
     evaluateDnsTunneling(log),
     evaluateMalwareBeaconing(log),
     evaluatePrivilegedServiceExposure(log),
-  ]);
+    evaluateSuspiciousProcessCreation(log),
+    evaluateSensitiveFileChange(log),
+    evaluatePrivilegeEscalation(log),
+    evaluatePersistenceChange(log),
+    evaluateHostLoginFailures(log),
+    evaluateDynamicRules(log),
+  ];
+  return Promise.all(tasks);
+};
 
 module.exports = {
   evaluateLog,

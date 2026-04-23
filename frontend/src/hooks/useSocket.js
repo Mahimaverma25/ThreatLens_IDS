@@ -1,12 +1,13 @@
-import { useEffect, useRef } from "react";
-import { io } from "socket.io-client";
-
-const apiBase = process.env.REACT_APP_API_URL || "http://localhost:5000";
-const SOCKET_URL = apiBase.replace(/\/api\/?$/, "");
+import { useEffect, useRef, useState } from "react";
+import createSocketClient from "../services/socket";
 
 const useSocket = (token, handlers = {}) => {
   const socketRef = useRef(null);
   const handlersRef = useRef(handlers);
+  const [connectionStatus, setConnectionStatus] = useState(token ? "connecting" : "idle");
+  const [lastConnectedAt, setLastConnectedAt] = useState(null);
+  const [lastDisconnectedAt, setLastDisconnectedAt] = useState(null);
+  const [lastError, setLastError] = useState("");
 
   useEffect(() => {
     handlersRef.current = handlers;
@@ -18,18 +19,13 @@ const useSocket = (token, handlers = {}) => {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      setConnectionStatus("idle");
       return undefined;
     }
 
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      timeout: 10000,
-    });
-
+    const socket = createSocketClient(token);
     socketRef.current = socket;
+    setConnectionStatus("connecting");
 
     const attachHandlers = () => {
       Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
@@ -38,9 +34,32 @@ const useSocket = (token, handlers = {}) => {
       });
     };
 
+    const handleConnect = () => {
+      setConnectionStatus("connected");
+      setLastConnectedAt(new Date().toISOString());
+      setLastError("");
+      attachHandlers();
+    };
+
+    const handleDisconnect = () => {
+      setConnectionStatus("disconnected");
+      setLastDisconnectedAt(new Date().toISOString());
+    };
+
+    const handleError = (error) => {
+      setConnectionStatus("error");
+      setLastError(error?.message || "Socket connection error");
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleError);
     attachHandlers();
 
     return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleError);
       Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
         socket.off(event, handler);
       });
@@ -67,7 +86,14 @@ const useSocket = (token, handlers = {}) => {
     };
   }, [handlers]);
 
-  return socketRef.current;
+  return {
+    socket: socketRef.current,
+    isConnected: connectionStatus === "connected",
+    connectionStatus,
+    lastConnectedAt,
+    lastDisconnectedAt,
+    lastError,
+  };
 };
 
 export default useSocket;

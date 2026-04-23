@@ -1,69 +1,90 @@
 # ThreatLens Agent
 
-The active agent entrypoint is `realtime-agent.js`.
+`backend/agent` now provides two Node-based agent entrypoints:
 
-It tails real Snort output files and sends signed log batches to `POST /api/logs/ingest`.
+- `agent.js`: host-oriented HIDS agent using the shared collectors in `collectors/`
+- `realtime-agent.js`: realtime Snort/IDS tail agent for network alert ingest
 
-## Supported Inputs
+Both entrypoints use the same authenticated API client and current backend `v2` HMAC signing flow.
 
-- Snort fast alerts
-- Snort EVE JSON alerts
+## What Changed
 
-## Required Environment Variables
+- shared logger moved to `utils/logger.js`
+- shared API signing and transport moved to `services/apiClient.js`
+- host collectors added for auth, process, file watch, system, and heartbeat payloads
+- `npm start` now launches the host agent
+- `npm run start:realtime` launches the Snort/realtime agent
 
-```env
-THREATLENS_API_URL=http://localhost:5000
-THREATLENS_API_KEY=<generated-token>
-THREATLENS_API_SECRET=<generated-secret>
-ASSET_ID=agent-001
-AGENT_MODE=snort
-SNORT_FAST_LOG_PATH=C:\snort\log\alert_fast.txt
-SNORT_EVE_JSON_PATH=C:\snort\log\eve.json
-```
+## Setup
 
-WSL/Linux example:
-
-```env
-SNORT_FAST_LOG_PATH=/var/log/snort/snort.alert.fast
-SNORT_EVE_JSON_PATH=/var/log/snort/eve.json
-```
-
-## Start
-
-```powershell
-cd backend\agent
+```bash
+cd backend/agent
 npm install
+```
+
+Copy `.env.example` to `.env` and fill in:
+
+- `THREATLENS_API_URL`
+- `THREATLENS_API_KEY`
+- `THREATLENS_API_SECRET`
+- `ASSET_ID`
+
+Use `backend/api-server/setup-dev-keys.js` to generate matching local credentials.
+
+## Run
+
+Host HIDS agent:
+
+```bash
 npm start
 ```
 
-## Reliability Changes
+Realtime Snort/IDS tail agent:
 
-- request signing no longer sends the raw secret on every request
-- duplicate Snort events are suppressed downstream by event fingerprint
-- failed batches are retried and restored to the in-memory buffer
-- the agent caps the buffer so a dead backend does not grow memory forever
+```bash
+npm run start:realtime
+```
 
-## Troubleshooting
+## Host Agent Inputs
 
-### No Snort events appear
+The host agent currently sends:
 
-- verify the configured file path exists
-- verify the agent user can read the file
-- verify Snort is writing new lines to it
-- check `agent-combined.log`
+- startup auth-style activity
+- periodic system telemetry
+- periodic process telemetry for the running agent process
+- file watch telemetry from `FILE_WATCH_PATHS`
+- signed collector heartbeat updates to `/api/agents/heartbeat`
 
-### The agent says the Snort file is not readable
+## Realtime Agent Inputs
 
-- Snort may be writing logs as another user/group such as `snort:adm`
-- grant your shell user read access, for example by adding it to the correct group
-- or run the agent with permission to read the Snort log
+The realtime agent currently tails:
 
-### The agent says `Unauthorized`
+- `SNORT_FAST_LOG_PATH`
+- `SNORT_EVE_JSON_PATH`
 
-- run `backend/api-server/setup-dev-keys.js`
-- make sure the token/secret in `.env` were updated
+and forwards normalized IDS events plus signed heartbeats.
 
-### The backend is healthy but nothing is sent
+## Important Environment Variables
 
-- confirm `AGENT_MODE=snort`
-- confirm the agent log shows `Watching Snort ...`
+```env
+THREATLENS_API_URL=http://localhost:5000
+THREATLENS_API_KEY=your-api-token
+THREATLENS_API_SECRET=your-api-secret
+ASSET_ID=agent-001
+FILE_WATCH_ENABLED=true
+FILE_WATCH_PATHS=C:\Users\Public,C:\Windows\Temp
+SYSTEM_INTERVAL_MS=15000
+PROCESS_INTERVAL_MS=12000
+HEARTBEAT_INTERVAL_MS=15000
+SNORT_FAST_LOG_PATH=C:\snort\log\alert_fast.txt
+SNORT_EVE_JSON_PATH=C:\snort\log\eve.json
+BATCH_SIZE=20
+MAX_RETRIES=3
+LOG_LEVEL=info
+```
+
+## Notes
+
+- `THREATLENS_API_URL` may be either `http://localhost:5000` or `http://localhost:5000/api`; the client normalizes both.
+- Heartbeats require the same API key, secret, and asset ID as log ingest.
+- If you get `401` responses, regenerate credentials and update `.env`.

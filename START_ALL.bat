@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 cls
 echo.
 echo +---------------------------------------------------------------------------+
-echo ^| ThreatLens Real-Time Startup                                              ^|
+echo ^| ThreatLens HIDS + Real-Time Startup                                       ^|
 echo +---------------------------------------------------------------------------+
 echo.
 
@@ -25,7 +25,7 @@ start "ThreatLens API Server" cmd /k "cd /d D:\Major Project\ThreatLens\backend\
 timeout /t 3 /nobreak >NUL
 
 echo.
-echo [3/6] Creating or refreshing agent credentials...
+echo [3/6] Creating or refreshing collector credentials...
 node setup-dev-keys.js
 
 echo.
@@ -35,10 +35,10 @@ start "ThreatLens IDS Engine" cmd /k "cd /d D:\Major Project\ThreatLens\backend\
 timeout /t 2 /nobreak >NUL
 
 echo.
-echo [5/6] Starting ThreatLens Agent...
-cd /d "D:\Major Project\ThreatLens\backend\agent"
+echo [5/6] Starting ThreatLens Unified Agent (HIDS + NIDS)...
+cd /d "D:\Major Project\ThreatLens\backend\collector"
 if not exist ".env" copy ".env.example" ".env" >NUL
-start "ThreatLens Agent" cmd /k "cd /d D:\Major Project\ThreatLens\backend\agent && npm start"
+start "ThreatLens Unified Agent" cmd /k "cd /d D:\Major Project\ThreatLens\backend\collector && python agent.py"
 timeout /t 2 /nobreak >NUL
 
 echo.
@@ -55,10 +55,16 @@ echo Backend   : http://localhost:5000
 echo IDS Engine: http://localhost:8000
 echo Frontend  : http://localhost:3000
 echo.
-echo Before expecting live data, make sure backend\agent\.env points to the real Snort log file:
+echo Collector defaults now live in backend\collector\.env
+echo HIDS mode:
+echo   SENSOR_TYPE=host
+echo   HOST_EVENTS_PATH=D:\Major Project\ThreatLens\backend\collector\sample-host-events.jsonl
+echo Network IDS mode:
+echo   SENSOR_TYPE=snort
 echo   SNORT_FAST_LOG_PATH=...
 echo   or
-echo   SNORT_EVE_JSON_PATH=...
+echo   SENSOR_TYPE=suricata
+echo   SURICATA_EVE_JSON_PATH=...
 echo.
 echo Close the spawned windows to stop the services.
 pause
