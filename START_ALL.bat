@@ -36,9 +36,9 @@ timeout /t 2 /nobreak >NUL
 
 echo.
 echo [5/6] Starting ThreatLens Unified Agent (HIDS + NIDS)...
-cd /d "D:\Major Project\ThreatLens\backend\collector"
+cd /d "D:\Major Project\ThreatLens\backend\agent"
 if not exist ".env" copy ".env.example" ".env" >NUL
-start "ThreatLens Unified Agent" cmd /k "cd /d D:\Major Project\ThreatLens\backend\collector && python agent.py"
+start "ThreatLens Unified Agent" cmd /k "cd /d D:\Major Project\ThreatLens\backend\agent && npm start"
 timeout /t 2 /nobreak >NUL
 
 echo.
@@ -51,20 +51,20 @@ echo +--------------------------------------------------------------------------
 echo ^| ThreatLens services started                                               ^|
 echo +---------------------------------------------------------------------------+
 echo.
-echo Backend   : http://localhost:5000
+echo Backend   : http://localhost:5001
 echo IDS Engine: http://localhost:8000
 echo Frontend  : http://localhost:3000
 echo.
-echo Collector defaults now live in backend\collector\.env
+echo Agent defaults now live in backend\agent\.env
 echo HIDS mode:
-echo   SENSOR_TYPE=host
-echo   HOST_EVENTS_PATH=D:\Major Project\ThreatLens\backend\collector\sample-host-events.jsonl
+echo   AGENT_MODE=host
+echo   FILE_WATCH_PATHS=C:\Users\Public,C:\Windows\Temp
 echo Network IDS mode:
-echo   SENSOR_TYPE=snort
+echo   AGENT_MODE=snort
 echo   SNORT_FAST_LOG_PATH=...
 echo   or
-echo   SENSOR_TYPE=suricata
-echo   SURICATA_EVE_JSON_PATH=...
+echo   AGENT_MODE=suricata
+echo   SNORT_EVE_JSON_PATH=...
 echo.
 echo Close the spawned windows to stop the services.
 pause

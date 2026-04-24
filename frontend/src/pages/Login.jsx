@@ -3,6 +3,9 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import "../styles/auth.css";
 
+const API_TARGET =
+  process.env.REACT_APP_API_URL || "https://threatlens-api-vav3.onrender.com/api";
+
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,7 +21,7 @@ const Login = () => {
     }
 
     if (err?.message === "Network Error") {
-      return "Unable to reach the ThreatLens API. Make sure the backend is running and that local ports 5000-5005 are available.";
+      return `Unable to reach the ThreatLens API at ${API_TARGET}. Make sure the Render API is awake and accepting requests.`;
     }
 
     return err?.message || "Login failed. Please try again.";

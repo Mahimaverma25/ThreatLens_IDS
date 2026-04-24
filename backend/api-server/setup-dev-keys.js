@@ -4,8 +4,8 @@
  * ThreatLens API key setup helper.
  *
  * Creates a local organization, asset, and API key pair for the live
- * collector flow, then syncs the generated credentials into
- * backend/collector/.env.
+ * local agent flow, then syncs the generated credentials into
+ * backend/agent/.env.
  */
 
 require("dotenv").config();
@@ -195,7 +195,7 @@ async function setupDevKeys() {
     console.log(`Secret: ${secret}`);
     console.log(`Asset:  ${asset.asset_id}`);
 
-    const apiPort = process.env.PORT || "5000";
+    const apiPort = process.env.PORT || "5001";
     const apiUrl = `http://localhost:${apiPort}/api`;
 
     console.log(`\n${"=".repeat(60)}`);

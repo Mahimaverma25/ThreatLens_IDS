@@ -1,6 +1,6 @@
 .tl-soc-page {
   display: grid;
-  gap: 22px;
+  gap: 18px;
   color: #d8e6ff;
 }
 
@@ -30,9 +30,9 @@
 .tl-soc-hero {
   display: flex;
   justify-content: space-between;
-  gap: 24px;
-  padding: 28px;
-  border-radius: 28px;
+  gap: 20px;
+  padding: 24px;
+  border-radius: 24px;
 }
 
 .tl-soc-kicker,
@@ -46,18 +46,18 @@
 }
 
 .tl-soc-hero h1 {
-  margin: 12px 0 10px;
+  margin: 10px 0 8px;
   color: #f3f8ff;
-  font-size: clamp(2rem, 4vw, 3rem);
-  line-height: 1.02;
+  font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+  line-height: 1.06;
 }
 
 .tl-soc-hero p {
-  max-width: 860px;
+  max-width: 760px;
   margin: 0;
   color: #97afcf;
-  font-size: 1rem;
-  line-height: 1.7;
+  font-size: 0.94rem;
+  line-height: 1.65;
 }
 
 .tl-soc-hero__copy,
@@ -73,29 +73,29 @@
 .tl-soc-hero__actions {
   display: grid;
   align-content: start;
-  gap: 14px;
-  min-width: 260px;
+  gap: 12px;
+  min-width: 240px;
 }
 
 .tl-soc-hero__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .tl-soc-hero__meta span:not(.tl-soc-badge) {
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 999px;
   background: rgba(10, 23, 43, 0.8);
   border: 1px solid rgba(148, 163, 184, 0.1);
   color: #8da7cc;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
 }
 
 .tl-soc-refresh {
-  min-height: 46px;
-  padding: 12px 18px;
+  min-height: 42px;
+  padding: 10px 16px;
   border: none;
   border-radius: 14px;
   background: linear-gradient(135deg, #35d6ff, #2f7df6);
@@ -113,8 +113,8 @@
 .tl-soc-hero__signal {
   display: grid;
   gap: 4px;
-  padding: 16px 18px;
-  border-radius: 18px;
+  padding: 14px 16px;
+  border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.12);
   background: rgba(8, 19, 38, 0.82);
 }
@@ -139,7 +139,7 @@
 .tl-soc-metrics,
 .tl-soc-grid {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .tl-soc-metrics {
@@ -167,8 +167,9 @@
 }
 
 .tl-soc-metric {
-  padding: 20px;
-  border-radius: 22px;
+  min-height: 148px;
+  padding: 16px 18px;
+  border-radius: 20px;
   transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
@@ -185,17 +186,18 @@
 
 .tl-soc-metric strong {
   display: block;
-  margin-top: 14px;
+  margin-top: 12px;
   color: #f5f9ff;
-  font-size: clamp(1.7rem, 2.5vw, 2.1rem);
+  font-size: clamp(1.45rem, 2vw, 1.9rem);
   line-height: 1.05;
 }
 
 .tl-soc-metric small {
   display: block;
-  margin-top: 10px;
+  margin-top: 8px;
   color: #8da7cc;
-  line-height: 1.5;
+  line-height: 1.45;
+  font-size: 0.84rem;
 }
 
 .tl-soc-metric--red {
@@ -217,10 +219,10 @@
 
 .tl-soc-panel {
   display: grid;
-  gap: 18px;
+  gap: 14px;
   min-width: 0;
-  padding: 22px;
-  border-radius: 26px;
+  padding: 18px;
+  border-radius: 22px;
 }
 
 .tl-soc-panel--span-2 {
@@ -236,13 +238,13 @@
 }
 
 .tl-soc-panel--terminal > .tl-soc-panel__header {
-  padding: 22px 22px 0;
+  padding: 18px 18px 0;
 }
 
 .tl-soc-panel h3 {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: #f3f8ff;
-  font-size: 1.08rem;
+  font-size: 1rem;
 }
 
 .tl-soc-panel__header {
@@ -253,8 +255,8 @@
 }
 
 .tl-soc-chart {
-  min-height: 290px;
-  height: 290px;
+  min-height: 250px;
+  height: 250px;
 }
 
 .tl-soc-chip-grid,
@@ -273,8 +275,8 @@
 .tl-soc-list__row,
 .tl-soc-health-list__item,
 .tl-soc-feed__item {
-  padding: 14px 16px;
-  border-radius: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.1);
   background: rgba(9, 21, 39, 0.82);
 }
@@ -320,7 +322,7 @@
 }
 
 .tl-soc-feed {
-  max-height: 420px;
+  max-height: 360px;
   overflow-y: auto;
 }
 
@@ -370,10 +372,10 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.16);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
@@ -492,7 +494,7 @@
 .tl-soc-empty {
   display: grid;
   place-items: center;
-  min-height: 140px;
+  min-height: 120px;
   color: #8ea5ca;
   text-align: center;
 }
@@ -516,7 +518,7 @@
 }
 
 .tl-soc-panel--terminal .dashboard-panel {
-  min-height: 320px;
+  min-height: 280px;
   border: none;
   box-shadow: none;
   background: transparent !important;
@@ -590,7 +592,7 @@
   }
 
   .tl-soc-hero {
-    padding: 22px;
+    padding: 20px;
   }
 
   .tl-soc-metrics {
@@ -607,7 +609,7 @@
   }
 
   .tl-soc-chart {
-    height: 260px;
-    min-height: 260px;
+    height: 220px;
+    min-height: 220px;
   }
 }

@@ -1,54 +1,56 @@
-export const navigationSections = [
-  {
-    title: "Overview",
-    items: [
-      { label: "Dashboard", path: "/dashboard", shortLabel: "DB", roles: ["admin", "analyst", "viewer"] },
-      { label: "Alerts", path: "/alerts", shortLabel: "AL", roles: ["admin", "analyst", "viewer"] },
-      { label: "Logs", path: "/logs", shortLabel: "LG", roles: ["admin", "analyst", "viewer"] },
-      { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "analyst", "viewer"] },
-      { label: "Threat Map", path: "/threat-map", shortLabel: "TM", roles: ["admin", "analyst", "viewer"] }
-    ]
-  },
-  {
-    title: "Detection",
-    items: [
-      { label: "Incidents", path: "/incidents", shortLabel: "IN", roles: ["admin", "analyst"] },
-      { label: "Assets", path: "/assets", shortLabel: "AS", roles: ["admin"] },
-      { label: "Rules", path: "/rules", shortLabel: "RL", roles: ["admin", "analyst", "viewer"] },
-      { label: "Threat Intel", path: "/threat-intel", shortLabel: "TI", roles: ["admin"] },
-      { label: "Model Health", path: "/model-health", shortLabel: "MH", roles: ["admin", "analyst"] }
-    ]
-  },
-  {
-    title: "Operations",
-    items: [
-      { label: "Response Playbooks", path: "/playbooks", shortLabel: "PB", roles: ["admin"] },
-      { label: "Users / API Keys", path: "/access", shortLabel: "UA", roles: ["admin"] }
-    ]
-  }
+export const activeNavigationItems = [
+  { label: "Dashboard", path: "/dashboard", shortLabel: "DB", roles: ["admin", "analyst", "viewer"] },
+  { label: "Overview", path: "/overview", shortLabel: "OV", roles: ["admin", "analyst", "viewer"] },
+  { label: "Upload", path: "/upload", shortLabel: "UP", roles: ["admin", "analyst", "viewer"] },
+  { label: "Live Monitoring", path: "/live-monitoring", shortLabel: "LM", roles: ["admin", "analyst", "viewer"] },
+  { label: "Alerts", path: "/alerts", shortLabel: "AL", roles: ["admin", "analyst", "viewer"] },
+  { label: "Logs", path: "/logs", shortLabel: "LG", roles: ["admin", "analyst", "user", "viewer"] },
+  { label: "Reports", path: "/reports", shortLabel: "RP", roles: ["admin", "analyst", "viewer"] },
+  { label: "Model Health", path: "/model-health", shortLabel: "MH", roles: ["admin", "analyst"] },
 ];
 
-export const allNavigationItems = navigationSections.flatMap((section) => section.items);
+export const futureModuleItems = [
+  "Access",
+  "Access Management",
+  "Alert Details",
+  "Assets",
+  "Blocked IPs",
+  "Incidents",
+  "Response Playbooks",
+  "Rules",
+  "Threat Intel",
+  "Threat Map",
+  "Users",
+];
+
+const defaultEyebrow = "ThreatLens security operations workspace";
 
 export const getPageMeta = (pathname) => {
-  if (pathname.startsWith("/alerts/")) {
-    return {
-      label: "Alert Details",
-      eyebrow: "Incident review / evidence / analyst actions"
-    };
-  }
-
-  const match = allNavigationItems.find((item) => item.path === pathname);
+  const match = activeNavigationItems.find((item) => item.path === pathname);
 
   if (match) {
     return {
       label: match.label,
-      eyebrow: "ThreatLens security operations workspace"
+      eyebrow: defaultEyebrow,
+    };
+  }
+
+  if (pathname === "/login") {
+    return {
+      label: "Login",
+      eyebrow: "ThreatLens authentication",
+    };
+  }
+
+  if (pathname === "/register") {
+    return {
+      label: "Register",
+      eyebrow: "ThreatLens authentication",
     };
   }
 
   return {
     label: "ThreatLens",
-    eyebrow: "ThreatLens security operations workspace"
+    eyebrow: defaultEyebrow,
   };
 };

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API_BASE_URL =
-  process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+  process.env.REACT_APP_API_URL || "https://threatlens-api-vav3.onrender.com/api";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -195,6 +195,29 @@ export const logs = {
     }),
 
   simulate: () => api.post("/logs/simulate"),
+};
+
+export const uploads = {
+  uploadCsv: async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      return await api.post("/upload/csv", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 45000,
+      });
+    } catch (error) {
+      if (error?.response?.status !== 404) {
+        throw error;
+      }
+
+      return api.post("/logs/upload", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 45000,
+      });
+    }
+  },
 };
 
 /* ================= OTHER MODULES ================= */

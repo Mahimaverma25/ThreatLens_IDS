@@ -1,62 +1,42 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-
+import { BrowserRouter as Router, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./context/ProtectedRoute";
-
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-
 import Dashboard from "./pages/Dashboard";
+import Overview from "./pages/Overview";
+import Upload from "./pages/Upload";
+import LiveMonitoring from "./pages/LiveMonitoring";
 import Alerts from "./pages/Alerts";
 import Logs from "./pages/Logs";
-import AlertDetails from "./pages/AlertDetails";
-import Incidents from "./pages/Incidents";
-import Assets from "./pages/Assets";
-import Rules from "./pages/Rules";
-import ThreatIntel from "./pages/ThreatIntel";
 import Reports from "./pages/Reports";
-import AccessManagement from "./pages/AccessManagement";
-import Users from "./pages/Users";
 import ModelHealth from "./pages/ModelHealth";
-import ResponsePlaybooks from "./pages/ResponsePlaybooks";
-import ThreatMap from "./pages/ThreatMap";
-
 import "./App.css";
 
 const pageBackgroundStyle = {
   "--app-page-background-image": `url(${process.env.PUBLIC_URL}/cropped.jpeg)`,
 };
 
-/* ================= ROLE HELPERS ================= */
-
 const normalizeRole = (role) => {
   if (!role) return "";
-
-  const value = String(role).toLowerCase().trim();
-
-  if (value === "user") return "analyst";
-  return value;
+  return String(role).toLowerCase().trim() === "user" ? "analyst" : String(role).toLowerCase().trim();
 };
 
 const isAllowedRole = (userRole, allowedRoles = []) => {
   const normalizedUserRole = normalizeRole(userRole);
-  const normalizedAllowedRoles = allowedRoles.map(normalizeRole);
-
-  return normalizedAllowedRoles.includes(normalizedUserRole);
+  return allowedRoles.map(normalizeRole).includes(normalizedUserRole);
 };
 
 const getDefaultAuthenticatedRoute = (role) => {
   const normalizedRole = normalizeRole(role);
 
-  if (normalizedRole === "admin") return "/dashboard";
-  if (normalizedRole === "analyst") return "/dashboard";
-  if (normalizedRole === "user") return "/logs";
+  if (normalizedRole === "analyst" || normalizedRole === "admin" || normalizedRole === "viewer") {
+    return "/dashboard";
+  }
 
-  return "/dashboard";
+  return "/logs";
 };
-
-/* ================= COMMON PAGE WRAPPER ================= */
 
 const PageShell = ({ children }) => (
   <div className="app-page-background" style={pageBackgroundStyle}>
@@ -64,19 +44,17 @@ const PageShell = ({ children }) => (
   </div>
 );
 
-/* ================= ROUTE GUARDS ================= */
+const FullPageLoading = () => (
+  <PageShell>
+    <div className="app-loading-screen">Loading ThreatLens...</div>
+  </PageShell>
+);
 
 const RoleRoute = ({ children, allowedRoles = [] }) => {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return (
-      <PageShell>
-        <div className="flex min-h-screen items-center justify-center text-white text-lg font-medium">
-          Loading...
-        </div>
-      </PageShell>
-    );
+    return <FullPageLoading />;
   }
 
   if (!user) {
@@ -98,19 +76,11 @@ const AppPage = ({ children, allowedRoles = ["admin", "analyst", "user", "viewer
   </PageShell>
 );
 
-/* ================= PUBLIC/AUTH ROUTES ================= */
-
 const HomeRoute = () => {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return (
-      <PageShell>
-        <div className="flex min-h-screen items-center justify-center text-white text-lg font-medium">
-          Loading...
-        </div>
-      </PageShell>
-    );
+    return <FullPageLoading />;
   }
 
   if (!user) {
@@ -124,13 +94,7 @@ const GuestRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return (
-      <PageShell>
-        <div className="flex min-h-screen items-center justify-center text-white text-lg font-medium">
-          Loading...
-        </div>
-      </PageShell>
-    );
+    return <FullPageLoading />;
   }
 
   if (user) {
@@ -140,15 +104,11 @@ const GuestRoute = ({ children }) => {
   return <PageShell>{children}</PageShell>;
 };
 
-/* ================= APP ================= */
-
 function AppRoutes() {
   return (
     <Routes>
-      {/* ================= HOME ================= */}
       <Route path="/" element={<HomeRoute />} />
 
-      {/* ================= PUBLIC ROUTES ================= */}
       <Route
         path="/login"
         element={
@@ -167,7 +127,6 @@ function AppRoutes() {
         }
       />
 
-      {/* ================= SHARED PROTECTED ROUTES ================= */}
       <Route
         path="/dashboard"
         element={
@@ -178,19 +137,37 @@ function AppRoutes() {
       />
 
       <Route
-        path="/alerts"
+        path="/overview"
         element={
           <AppPage allowedRoles={["admin", "analyst", "viewer"]}>
-            <Alerts />
+            <Overview />
           </AppPage>
         }
       />
 
       <Route
-        path="/alerts/:id"
+        path="/upload"
         element={
           <AppPage allowedRoles={["admin", "analyst", "viewer"]}>
-            <AlertDetails />
+            <Upload />
+          </AppPage>
+        }
+      />
+
+      <Route
+        path="/live-monitoring"
+        element={
+          <AppPage allowedRoles={["admin", "analyst", "viewer"]}>
+            <LiveMonitoring />
+          </AppPage>
+        }
+      />
+
+      <Route
+        path="/alerts"
+        element={
+          <AppPage allowedRoles={["admin", "analyst", "viewer"]}>
+            <Alerts />
           </AppPage>
         }
       />
@@ -214,70 +191,6 @@ function AppRoutes() {
       />
 
       <Route
-        path="/threat-map"
-        element={
-          <AppPage allowedRoles={["admin", "analyst", "viewer"]}>
-            <ThreatMap />
-          </AppPage>
-        }
-      />
-
-      {/* ================= ADMIN ROUTES ================= */}
-      <Route
-        path="/incidents"
-        element={
-          <AppPage allowedRoles={["admin", "analyst"]}>
-            <Incidents />
-          </AppPage>
-        }
-      />
-
-      <Route
-        path="/assets"
-        element={
-          <AppPage allowedRoles={["admin"]}>
-            <Assets />
-          </AppPage>
-        }
-      />
-
-      <Route
-        path="/rules"
-        element={
-          <AppPage allowedRoles={["admin", "analyst", "viewer"]}>
-            <Rules />
-          </AppPage>
-        }
-      />
-
-      <Route
-        path="/threat-intel"
-        element={
-          <AppPage allowedRoles={["admin"]}>
-            <ThreatIntel />
-          </AppPage>
-        }
-      />
-
-      <Route
-        path="/access"
-        element={
-          <AppPage allowedRoles={["admin"]}>
-            <AccessManagement />
-          </AppPage>
-        }
-      />
-
-      <Route
-        path="/users"
-        element={
-          <AppPage allowedRoles={["admin"]}>
-            <Users />
-          </AppPage>
-        }
-      />
-
-      <Route
         path="/model-health"
         element={
           <AppPage allowedRoles={["admin", "analyst"]}>
@@ -286,16 +199,6 @@ function AppRoutes() {
         }
       />
 
-      <Route
-        path="/playbooks"
-        element={
-          <AppPage allowedRoles={["admin"]}>
-            <ResponsePlaybooks />
-          </AppPage>
-        }
-      />
-
-      {/* ================= FALLBACK ================= */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
