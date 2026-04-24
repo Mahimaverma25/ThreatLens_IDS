@@ -17,32 +17,27 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  Legend,
 } from "recharts";
 
 const SEVERITY_COLORS = {
-  Critical: "#ff5d73",
-  High: "#ff9f43",
-  Medium: "#ffd166",
-  Low: "#4cd97b",
-  Unknown: "#7c8aa5",
+  critical: "#ff5d73",
+  high: "#ff9f43",
+  medium: "#ffd166",
+  low: "#4cd97b",
+  info: "#4cc9f0",
+  unknown: "#7c8aa5",
 };
 
-const PROTOCOL_COLORS = [
+const CHART_COLORS = [
   "#48cae4",
   "#00b4d8",
   "#90e0ef",
-  "#ffb703",
-  "#fb8500",
-  "#8ecae6",
-];
-
-const SOURCE_COLORS = [
-  "#00d1ff",
   "#6ee7b7",
-  "#fbbf24",
-  "#fb7185",
+  "#ffd166",
+  "#fb8500",
   "#c084fc",
-  "#38bdf8",
+  "#fb7185",
 ];
 
 const defaultStats = {
@@ -57,9 +52,7 @@ const defaultStats = {
   topAttackTypes: [],
   topPorts: [],
   protocolDistribution: [],
-  classifications: [],
   alertSourceDistribution: [],
-  alertStatusDistribution: [],
   severityDistribution: [],
   topSourceIps: [],
   topDestinationIps: [],
@@ -133,7 +126,7 @@ const formatCompact = (value) =>
   new Intl.NumberFormat("en-US", {
     notation: "compact",
     maximumFractionDigits: 1,
-  }).format(Object.is(Number(value || 0), -0) ? 0 : Math.max(0, Number(value || 0)));
+  }).format(Math.max(0, Number(value || 0)));
 
 const formatDateTime = (value) => {
   if (!value) return "No data";
@@ -158,23 +151,20 @@ const titleCase = (value) => {
 const isUnknownLike = (value) => {
   if (value === null || value === undefined) return true;
   const normalized = String(value).trim().toLowerCase();
-  return (
-    !normalized ||
-    normalized === "unknown" ||
-    normalized === "n/a" ||
-    normalized === "-"
-  );
+  return !normalized || normalized === "unknown" || normalized === "n/a" || normalized === "-";
 };
 
 const hasMeaningfulValue = (value) => !isUnknownLike(value);
 
 const hasKnownPort = (value) => {
   const normalized = String(value || "").trim();
-  return (
-    Boolean(normalized) &&
-    normalized !== "Unknown" &&
-    !normalized.startsWith("N/A")
-  );
+  return Boolean(normalized) && normalized !== "Unknown" && !normalized.startsWith("N/A");
+};
+
+const shortenLabel = (value, maxLength = 18) => {
+  const text = String(value || "");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
 };
 
 const getMessage = (log) =>
@@ -251,27 +241,80 @@ const deriveClassification = (log) => {
 
   const message = getMessage(log).toLowerCase();
   const protocol = String(getProtocol(log)).toLowerCase();
+  const processName = String(log?.processName || log?.metadata?.processName || "").toLowerCase();
 
+  if (message.includes("file watch") || message.includes("file change")) return "File Integrity Change";
+  if (message.includes("heartbeat")) return "System Heartbeat";
+  if (message.includes("process") || processName) return "Process Activity";
+  if (message.includes("auth") || message.includes("login")) return "Authentication Activity";
   if (message.includes("sql")) return "SQL Injection";
   if (message.includes("xss")) return "XSS Attempt";
-  if (message.includes("brute") || message.includes("login"))
-    return "Brute Force";
+  if (message.includes("brute")) return "Brute Force";
   if (message.includes("scan")) return "Recon / Scan";
-  if (
-    message.includes("flood") ||
-    message.includes("ddos") ||
-    message.includes("dos")
-  ) {
-    return "DoS / Flood";
-  }
-  if (message.includes("trojan") || message.includes("malware"))
-    return "Malware Activity";
+  if (message.includes("flood") || message.includes("ddos") || message.includes("dos")) return "DoS / Flood";
+  if (message.includes("trojan") || message.includes("malware")) return "Malware Activity";
   if (protocol.includes("icmp")) return "ICMP Activity";
   if (protocol.includes("udp")) return "UDP Activity";
   if (protocol.includes("tcp")) return "TCP Activity";
 
   return "General Threat";
 };
+
+const deriveSeverity = (log) => {
+  const raw = String(
+    log?.severity ||
+      log?.metadata?.severity ||
+      log?.metadata?.snort?.severity ||
+      log?.metadata?.snort?.priority ||
+      ""
+  ).toLowerCase();
+
+  if (["critical", "high", "medium", "low", "info"].includes(raw)) return raw;
+
+  const message = getMessage(log).toLowerCase();
+  const processName = String(log?.processName || log?.metadata?.processName || "").toLowerCase();
+
+  if (
+    message.includes("encodedcommand") ||
+    message.includes("powershell") ||
+    message.includes("wmic") ||
+    processName.includes("powershell") ||
+    processName.includes("wmic")
+  ) {
+    return "high";
+  }
+
+  if (message.includes("file watch") || message.includes("file change")) return "medium";
+  if (message.includes("heartbeat")) return "info";
+  if (message.includes("process")) return "low";
+
+  return "unknown";
+};
+
+const deriveSensorType = (log) => {
+  const source = safeStatus(log?.metadata?.sensorType || log?.source);
+
+  if (source === "snort" || source === "suricata") return "network";
+  if (source === "host" || source === "hids" || source === "agent" || source === "node-host-agent") return "host";
+
+  const protocol = safeStatus(getProtocol(log));
+  const message = safeStatus(getMessage(log));
+
+  if (protocol === "unknown" && (message.includes("heartbeat") || message.includes("process") || message.includes("file watch"))) {
+    return "host";
+  }
+
+  return source === "unknown" ? "host" : source;
+};
+
+const deriveHost = (log) =>
+  log?.hostname ||
+  log?.host ||
+  log?.metadata?.hostname ||
+  log?.metadata?.host ||
+  log?.asset_id ||
+  log?.assetId ||
+  "Unknown Host";
 
 const deriveLog = (log) => ({
   ...log,
@@ -282,6 +325,9 @@ const deriveLog = (log) => ({
   derivedDestIp: getDestIp(log),
   derivedPriority: getPriority(log),
   derivedClassification: deriveClassification(log),
+  derivedSeverity: deriveSeverity(log),
+  derivedSensorType: deriveSensorType(log),
+  derivedHost: deriveHost(log),
 });
 
 const buildBuckets = (items, keyGetter, limit = 6) => {
@@ -299,16 +345,7 @@ const buildBuckets = (items, keyGetter, limit = 6) => {
     .slice(0, limit);
 };
 
-const shortenLabel = (value, maxLength = 18) => {
-  const text = String(value || "");
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 1)}…`;
-};
-
-const isNetworkTelemetryLog = (log) => {
-  const source = safeStatus(log?.metadata?.sensorType || log?.source);
-  return source === "snort" || source === "suricata";
-};
+const isNetworkTelemetryLog = (log) => log?.derivedSensorType === "network";
 
 const buildCoverage = (items) => {
   const total = items.length;
@@ -330,26 +367,25 @@ const buildCoverage = (items) => {
 const deriveModelLabel = (health) => {
   const idsStatus = safeStatus(health?.idsEngine);
   if (idsStatus === "offline") return "Unavailable";
-  if (health?.modelLoaded === true) {
-    return health?.usingFallback ? "Fallback Model" : "Random Forest Loaded";
-  }
+  if (health?.modelLoaded === true) return health?.usingFallback ? "Fallback Model" : "Random Forest Loaded";
   if (health?.modelLoaded === false) return "Rules Only";
   return "Unknown";
 };
 
 const getStatusTone = (value) => {
   const normalized = safeStatus(value);
-  if (
-    normalized === "online" ||
-    normalized === "ok" ||
-    normalized === "connected"
-  ) {
+  if (normalized === "online" || normalized === "ok" || normalized === "connected" || normalized === "active") {
     return "healthy";
   }
   if (normalized === "offline" || normalized === "disconnected") {
     return "offline";
   }
   return "degraded";
+};
+
+const getSeverityTone = (value) => {
+  const normalized = safeStatus(value);
+  return SEVERITY_COLORS[normalized] || SEVERITY_COLORS.unknown;
 };
 
 const Dashboard = () => {
@@ -374,45 +410,32 @@ const Dashboard = () => {
     try {
       if (!silent) setError("");
 
-      const [alertsRes, logsRes, statsRes, healthRes] =
-        await Promise.allSettled([
-          alerts.list(100, 1),
-          logs.list(80, 1),
-          dashboard.stats(),
-          dashboard.health(),
-        ]);
+      const [alertsRes, logsRes, statsRes, healthRes] = await Promise.allSettled([
+        alerts.list(100, 1),
+        logs.list(120, 1),
+        dashboard.stats(),
+        dashboard.health(),
+      ]);
 
       const alertsData =
-        alertsRes.status === "fulfilled"
-          ? safeArray(alertsRes.value?.data?.data)
-          : [];
+        alertsRes.status === "fulfilled" ? safeArray(alertsRes.value?.data?.data) : [];
 
       const logData =
         logsRes.status === "fulfilled"
           ? safeArray(logsRes.value?.data?.data).map(deriveLog)
           : [];
 
-      const statsData =
-        statsRes.status === "fulfilled" ? (statsRes.value?.data ?? {}) : {};
+      const statsData = statsRes.status === "fulfilled" ? statsRes.value?.data ?? {} : {};
+      const healthData = healthRes.status === "fulfilled" ? healthRes.value?.data ?? {} : {};
 
-      const healthData =
-        healthRes.status === "fulfilled" ? (healthRes.value?.data ?? {}) : {};
-
-      const apiRecentLogs = safeArray(statsData?.analytics?.recentLogs).map(
-        deriveLog
-      );
-
-      const recentLogs =
-        apiRecentLogs.length > 0 ? apiRecentLogs.slice(0, 12) : logData.slice(0, 12);
-
+      const apiRecentLogs = safeArray(statsData?.analytics?.recentLogs).map(deriveLog);
+      const recentLogs = apiRecentLogs.length > 0 ? apiRecentLogs.slice(0, 12) : logData.slice(0, 12);
       const recentAlerts = safeArray(statsData?.analytics?.recentAlerts).length
         ? safeArray(statsData?.analytics?.recentAlerts).slice(0, 8)
         : alertsData.slice(0, 8);
 
       const snortLogs = logData.filter(isNetworkTelemetryLog);
-      const hostLogs = logData.filter(
-        (log) => safeStatus(log?.metadata?.sensorType || log?.source) === "host"
-      );
+      const hostLogs = logData.filter((log) => log.derivedSensorType === "host");
       const networkCoverage = buildCoverage(snortLogs);
 
       const fallbackProtocolDistribution = buildBuckets(
@@ -429,7 +452,7 @@ const Dashboard = () => {
 
       const fallbackTopThreats = buildBuckets(
         alertsData,
-        (item) => item?.attackType || item?.type,
+        (item) => item?.attackType || item?.type || item?.title,
         8
       ).filter((item) => !isUnknownLike(item.name));
 
@@ -451,39 +474,70 @@ const Dashboard = () => {
       );
 
       const fallbackSeverityDistribution = buildBuckets(
-        alertsData,
-        (alert) => alert?.severity || "Unknown",
+        alertsData.length
+          ? alertsData.map((item) => ({ ...item, severity: item?.severity || "unknown" }))
+          : hostLogs,
+        (item) => item?.severity || item?.derivedSeverity || "unknown",
+        6
+      );
+
+      const fallbackHostActivity = buildBuckets(
+        hostLogs,
+        (log) => log.derivedClassification,
+        6
+      );
+
+      const fallbackTopHosts = buildBuckets(
+        hostLogs,
+        (log) => log.derivedHost,
         6
       );
 
       const uniqueSourceIps = new Set(
-        logData
-          .map((log) => log.derivedSrcIp)
-          .filter((value) => !isUnknownLike(value))
+        logData.map((log) => log.derivedSrcIp).filter((value) => !isUnknownLike(value))
       ).size;
 
       const uniqueDestinationIps = new Set(
-        logData
-          .map((log) => log.derivedDestIp)
-          .filter((value) => !isUnknownLike(value))
+        logData.map((log) => log.derivedDestIp).filter((value) => !isUnknownLike(value))
       ).size;
 
       const avgPriority =
         logData.length > 0
-          ? logData.reduce((sum, log) => sum + log.derivedPriority, 0) /
-            logData.length
+          ? logData.reduce((sum, log) => sum + log.derivedPriority, 0) / logData.length
           : 0;
+
+      const failedLoginCount = hostLogs.filter((log) =>
+        log.derivedClassification.toLowerCase().includes("authentication")
+      ).length;
+
+      const suspiciousProcessCount = hostLogs.filter((log) => {
+        const message = String(log.derivedMessage || "").toLowerCase();
+        return (
+          message.includes("powershell") ||
+          message.includes("wmic") ||
+          message.includes("cmd") ||
+          log.derivedClassification.toLowerCase().includes("process")
+        );
+      }).length;
+
+      const fileChangeCount = hostLogs.filter((log) =>
+        log.derivedClassification.toLowerCase().includes("file")
+      ).length;
+
+      const activeHosts = new Set(
+        hostLogs.map((log) => log.derivedHost).filter((host) => !isUnknownLike(host))
+      ).size;
 
       const nextHealth = {
         database: safeStatus(healthData?.database),
-        idsEngine: safeStatus(
-          healthData?.idsEngine?.status ?? healthData?.idsEngine
-        ),
+        idsEngine: safeStatus(healthData?.idsEngine?.status ?? healthData?.idsEngine),
         snort: safeStatus(
-          healthData?.snort?.status ??
-            (snortLogs.length > 0 ? "online" : "unknown")
+          healthData?.snort?.status ?? (snortLogs.length > 0 ? "online" : "unknown")
         ),
-        host: safeStatus(healthData?.host?.status),
+        host: safeStatus(
+          healthData?.host?.status ??
+            (hostLogs.length > 0 ? "online" : "unknown")
+        ),
         lastDetectionTime:
           healthData?.lastDetectionTime ??
           recentAlerts?.[0]?.timestamp ??
@@ -492,11 +546,11 @@ const Dashboard = () => {
         liveSnortEventsLast24h:
           healthData?.snort?.liveEventsLast24h ?? snortLogs.length,
         liveHostEventsLast24h:
-          healthData?.host?.liveEventsLast24h ?? 0,
+          healthData?.host?.liveEventsLast24h ?? hostLogs.length,
         snortLastEventAt:
           healthData?.snort?.lastEventAt ?? snortLogs?.[0]?.timestamp ?? null,
         hostLastEventAt:
-          healthData?.host?.lastEventAt ?? null,
+          healthData?.host?.lastEventAt ?? hostLogs?.[0]?.timestamp ?? null,
         modelLoaded:
           healthData?.idsEngine?.modelLoaded === null ||
           healthData?.idsEngine?.modelLoaded === undefined
@@ -526,9 +580,7 @@ const Dashboard = () => {
       };
 
       const severityCount = (level) =>
-        alertsData.filter(
-          (item) => safeStatus(item?.severity) === safeStatus(level)
-        ).length;
+        alertsData.filter((item) => safeStatus(item?.severity) === safeStatus(level)).length;
 
       const allRequestsFailed =
         alertsRes.status === "rejected" &&
@@ -539,15 +591,12 @@ const Dashboard = () => {
       const nextStats = {
         mode:
           statsData?.mode ||
-          (logData.length > 0 || alertsData.length > 0
-            ? "live-monitoring"
-            : "waiting-for-telemetry"),
+          (logData.length > 0 || alertsData.length > 0 ? "live-monitoring" : "waiting-for-telemetry"),
         totalAlerts: statsData?.alerts?.total ?? alertsData.length,
-        criticalSeverity:
-          statsData?.alerts?.critical ?? severityCount("Critical"),
-        highSeverity: statsData?.alerts?.high ?? severityCount("High"),
-        mediumSeverity: statsData?.alerts?.medium ?? severityCount("Medium"),
-        lowSeverity: statsData?.alerts?.low ?? severityCount("Low"),
+        criticalSeverity: statsData?.alerts?.critical ?? severityCount("critical"),
+        highSeverity: statsData?.alerts?.high ?? severityCount("high"),
+        mediumSeverity: statsData?.alerts?.medium ?? severityCount("medium"),
+        lowSeverity: statsData?.alerts?.low ?? severityCount("low"),
         recentLogs,
         recentAlerts,
         topAttackTypes: safeArray(statsData?.analytics?.topAttackTypes).length
@@ -560,23 +609,17 @@ const Dashboard = () => {
               .filter((item) => !isUnknownLike(item?.name))
               .slice(0, 6)
           : fallbackTopPorts,
-        protocolDistribution: safeArray(
-          statsData?.analytics?.protocolDistribution
-        ).length
+        protocolDistribution: safeArray(statsData?.analytics?.protocolDistribution).length
           ? safeArray(statsData?.analytics?.protocolDistribution)
               .filter((item) => !isUnknownLike(item?.name))
               .slice(0, 6)
           : fallbackProtocolDistribution,
-        alertSourceDistribution: safeArray(
-          statsData?.analytics?.alertSourceDistribution
-        ).length
+        alertSourceDistribution: safeArray(statsData?.analytics?.alertSourceDistribution).length
           ? safeArray(statsData?.analytics?.alertSourceDistribution)
               .filter((item) => !isUnknownLike(item?.name))
               .slice(0, 6)
           : fallbackAlertSourceDistribution,
-        severityDistribution: safeArray(
-          statsData?.analytics?.severityDistribution
-        ).length
+        severityDistribution: safeArray(statsData?.analytics?.severityDistribution).length
           ? safeArray(statsData?.analytics?.severityDistribution).slice(0, 6)
           : fallbackSeverityDistribution,
         topSourceIps: safeArray(statsData?.analytics?.topSourceIps).length
@@ -584,17 +627,23 @@ const Dashboard = () => {
               .filter((item) => !isUnknownLike(item?.name))
               .slice(0, 6)
           : fallbackTopSourceIps,
-        topDestinationIps: safeArray(statsData?.analytics?.topDestinationIps)
-          .length
+        topDestinationIps: safeArray(statsData?.analytics?.topDestinationIps).length
           ? safeArray(statsData?.analytics?.topDestinationIps)
               .filter((item) => !isUnknownLike(item?.name))
               .slice(0, 6)
           : fallbackTopDestinationIps,
         timeline: safeArray(statsData?.analytics?.timeline),
+        hostInsights: {
+          failedLoginCount,
+          suspiciousProcessCount,
+          fileChangeCount,
+          activeHosts,
+          topHosts: fallbackTopHosts,
+          hostActivityMix: fallbackHostActivity,
+        },
         traffic: {
           eventsLast24h: statsData?.traffic?.eventsLast24h ?? logData.length,
-          uniqueSourceIps:
-            statsData?.traffic?.uniqueSourceIps ?? uniqueSourceIps,
+          uniqueSourceIps: statsData?.traffic?.uniqueSourceIps ?? uniqueSourceIps,
           uniqueDestinationIps:
             statsData?.traffic?.uniqueDestinationIps ?? uniqueDestinationIps,
           avgPriority: statsData?.traffic?.avgPriority ?? avgPriority,
@@ -604,33 +653,19 @@ const Dashboard = () => {
             statsData?.traffic?.hostEventsLast24h ?? hostLogs.length,
           liveSnortAlertsLast24h:
             statsData?.traffic?.liveSnortAlertsLast24h ??
-            alertsData.filter((alert) => safeStatus(alert.source) === "snort")
-              .length,
-          hostAlertsLast24h:
-            statsData?.traffic?.hostAlertsLast24h ?? 0,
+            alertsData.filter((alert) => safeStatus(alert.source) === "snort").length,
+          hostAlertsLast24h: statsData?.traffic?.hostAlertsLast24h ?? 0,
           mlAnomaliesLast24h:
             statsData?.traffic?.mlAnomaliesLast24h ??
-            logData.filter((log) => Boolean(log?.metadata?.idsEngine?.is_anomaly))
-              .length,
+            logData.filter((log) => Boolean(log?.metadata?.idsEngine?.is_anomaly)).length,
           telemetryCoverage: statsData?.traffic?.telemetryCoverage ?? {
             total: logData.length,
-            withProtocol: logData.filter((log) =>
-              hasMeaningfulValue(log.derivedProtocol)
-            ).length,
-            withDestination: logData.filter((log) =>
-              hasMeaningfulValue(log.derivedDestIp)
-            ).length,
-            withPort: logData.filter((log) => hasKnownPort(log.derivedDestPort))
-              .length,
-            unknownProtocol: logData.filter(
-              (log) => !hasMeaningfulValue(log.derivedProtocol)
-            ).length,
-            unknownDestination: logData.filter(
-              (log) => !hasMeaningfulValue(log.derivedDestIp)
-            ).length,
-            unknownPort: logData.filter(
-              (log) => !hasKnownPort(log.derivedDestPort)
-            ).length,
+            withProtocol: logData.filter((log) => hasMeaningfulValue(log.derivedProtocol)).length,
+            withDestination: logData.filter((log) => hasMeaningfulValue(log.derivedDestIp)).length,
+            withPort: logData.filter((log) => hasKnownPort(log.derivedDestPort)).length,
+            unknownProtocol: logData.filter((log) => !hasMeaningfulValue(log.derivedProtocol)).length,
+            unknownDestination: logData.filter((log) => !hasMeaningfulValue(log.derivedDestIp)).length,
+            unknownPort: logData.filter((log) => !hasKnownPort(log.derivedDestPort)).length,
           },
           networkCoverage,
         },
@@ -656,9 +691,7 @@ const Dashboard = () => {
 
   const triggerRefresh = useCallback(() => {
     const now = Date.now();
-    if (now - lastRefreshRequestRef.current < 1500) {
-      return;
-    }
+    if (now - lastRefreshRequestRef.current < 1500) return;
     lastRefreshRequestRef.current = now;
 
     clearTimeout(refreshTimerRef.current);
@@ -670,22 +703,24 @@ const Dashboard = () => {
   const socketHandlers = useMemo(
     () => ({
       "socket:ready": () => {
-        setLiveOpsFeed((current) => [
-          {
-            id: `socket-ready-${Date.now()}`,
-            label: "Socket session established",
-            meta: "Dashboard subscribed to the real-time channel",
-            timestamp: new Date().toISOString(),
-          },
-          ...current,
-        ].slice(0, 8));
+        setLiveOpsFeed((current) =>
+          [
+            {
+              id: `socket-ready-${Date.now()}`,
+              label: "Socket session established",
+              meta: "Dashboard subscribed to the real-time channel",
+              timestamp: new Date().toISOString(),
+            },
+            ...current,
+          ].slice(0, 10)
+        );
       },
       "alerts:new": triggerRefresh,
       "alerts:update": triggerRefresh,
       "log:new": (event) => {
         const newLog = event?.data || event;
         if (newLog) {
-          setLiveLogs((current) => [...current, newLog].slice(-50));
+          setLiveLogs((current) => [deriveLog(newLog), ...current].slice(0, 50));
         }
         triggerRefresh();
       },
@@ -710,26 +745,31 @@ const Dashboard = () => {
             },
           },
         }));
-        setLiveOpsFeed((current) => [
-          {
-            id: `heartbeat-${event?.timestamp || Date.now()}`,
-            label: "Collector heartbeat",
-            meta: `${heartbeat.status || "unknown"} / ${heartbeat.agentType || "collector"} / queue ${heartbeat.queueDepth || 0}`,
-            timestamp: heartbeat.receivedAt || event?.timestamp || new Date().toISOString(),
-          },
-          ...current,
-        ].slice(0, 8));
+
+        setLiveOpsFeed((current) =>
+          [
+            {
+              id: `heartbeat-${event?.timestamp || Date.now()}`,
+              label: "Collector heartbeat",
+              meta: `${heartbeat.status || "unknown"} / ${heartbeat.agentType || "collector"} / queue ${heartbeat.queueDepth || 0}`,
+              timestamp: heartbeat.receivedAt || event?.timestamp || new Date().toISOString(),
+            },
+            ...current,
+          ].slice(0, 10)
+        );
       },
       "stream:event": (event) => {
-        setLiveOpsFeed((current) => [
-          {
-            id: `${event?.type || "stream"}-${event?.timestamp || Date.now()}`,
-            label: event?.type || "Stream event",
-            meta: `${event?.source || "pipeline"} / inserted ${event?.insertedCount || 0} / duplicates ${event?.duplicateCount || 0}`,
-            timestamp: event?.timestamp || new Date().toISOString(),
-          },
-          ...current,
-        ].slice(0, 8));
+        setLiveOpsFeed((current) =>
+          [
+            {
+              id: `${event?.type || "stream"}-${event?.timestamp || Date.now()}`,
+              label: event?.type || "Stream event",
+              meta: `${event?.source || "pipeline"} / inserted ${event?.insertedCount || 0} / duplicates ${event?.duplicateCount || 0}`,
+              timestamp: event?.timestamp || new Date().toISOString(),
+            },
+            ...current,
+          ].slice(0, 10)
+        );
         triggerRefresh();
       },
     }),
@@ -743,10 +783,7 @@ const Dashboard = () => {
     fetchStats();
 
     pollingRef.current = setInterval(() => {
-      if (
-        document.visibilityState === "visible" &&
-        socketState.connectionStatus !== "connected"
-      ) {
+      if (document.visibilityState === "visible" && socketState.connectionStatus !== "connected") {
         fetchStats(true);
       }
     }, 30000);
@@ -763,7 +800,7 @@ const Dashboard = () => {
       {
         label: "Total Alerts",
         value: formatCompact(stats.totalAlerts),
-        note: "Correlated detection volume",
+        note: "Detection volume",
       },
       {
         label: "Events 24h",
@@ -773,34 +810,32 @@ const Dashboard = () => {
       {
         label: "Host Events",
         value: formatCompact(stats.traffic.hostEventsLast24h),
-        note: "Endpoint telemetry",
+        note: "HIDS telemetry",
+      },
+      {
+        label: "Active Hosts",
+        value: formatCompact(stats.hostInsights?.activeHosts || 0),
+        note: "Endpoints reporting in",
+      },
+      {
+        label: "Suspicious Processes",
+        value: formatCompact(stats.hostInsights?.suspiciousProcessCount || 0),
+        note: "Process activity to review",
+      },
+      {
+        label: "File Changes",
+        value: formatCompact(stats.hostInsights?.fileChangeCount || 0),
+        note: "Integrity-related events",
+      },
+      {
+        label: "Failed Logins",
+        value: formatCompact(stats.hostInsights?.failedLoginCount || 0),
+        note: "Authentication activity",
       },
       {
         label: "ML Anomalies",
         value: formatCompact(stats.traffic.mlAnomaliesLast24h),
         note: "Model-flagged events",
-      },
-      {
-        label: "Source IPs",
-        value: formatCompact(stats.traffic.uniqueSourceIps),
-        note: "Unique senders",
-      },
-      {
-        label: "Destination IPs",
-        value: formatCompact(stats.traffic.uniqueDestinationIps),
-        note: "Targeted hosts",
-      },
-      {
-        label: "Avg Priority",
-        value: stats.traffic.avgPriority
-          ? Number(stats.traffic.avgPriority).toFixed(1)
-          : "-",
-        note: "Snort severity baseline",
-      },
-      {
-        label: "Tracked Protocols",
-        value: formatCompact(stats.protocolDistribution.length),
-        note: "Across the last 24h",
       },
     ],
     [stats]
@@ -817,71 +852,26 @@ const Dashboard = () => {
             : "No fresh traffic yet",
       },
       {
-        label: "Endpoint Detections",
+        label: "Host Alerts 24h",
         value: formatCompact(stats.traffic.hostAlertsLast24h),
         note:
           stats.traffic.hostAlertsLast24h > 0
-            ? "Host alerts generated"
+            ? "Endpoint detections generated"
             : stats.traffic.hostEventsLast24h > 0
-              ? "HIDS active, no host alerts yet"
+              ? "HIDS active, no high severity detections yet"
               : "Waiting for host detections",
       },
       {
         label: "Model State",
         value: deriveModelLabel(stats.health),
-        note: "Engine readiness",
+        note: "Detection engine readiness",
       },
     ],
     [stats]
   );
 
-  const telemetryQualityMetrics = useMemo(
-    () => {
-      const coverage = stats.traffic.networkCoverage;
-      const isInactive = coverage.total === 0;
-
-      return [
-        {
-          label: "Protocol Coverage",
-          value: isInactive ? "N/A" : formatCompact(coverage.withProtocol),
-          note: isInactive
-            ? "NIDS inactive or no enriched network events"
-            : `${formatCompact(coverage.unknownProtocol)} missing`,
-        },
-        {
-          label: "Destination Coverage",
-          value: isInactive ? "N/A" : formatCompact(coverage.withDestination),
-          note: isInactive
-            ? "NIDS inactive or no network destinations yet"
-            : `${formatCompact(coverage.unknownDestination)} missing`,
-        },
-        {
-          label: "Port Coverage",
-          value: isInactive ? "N/A" : formatCompact(coverage.withPort),
-          note: isInactive
-            ? "NIDS inactive or no port-enriched events"
-            : `${formatCompact(coverage.unknownPort)} missing`,
-        },
-      ];
-    },
-    [stats]
-  );
-
-  const controlCards = useMemo(
+  const hostHealthCards = useMemo(
     () => [
-      {
-        label: "Socket Gateway",
-        value: titleCase(socketState.connectionStatus),
-        meta:
-          socketState.connectionStatus === "connected"
-            ? "Live dashboard subscription active"
-            : socketState.lastError || "Waiting for live channel",
-        tone: getStatusTone(
-          socketState.connectionStatus === "connected"
-            ? "connected"
-            : socketState.connectionStatus
-        ),
-      },
       {
         label: "Collector",
         value: titleCase(stats.health.collector.status),
@@ -899,18 +889,23 @@ const Dashboard = () => {
         tone: getStatusTone(stats.health.host),
       },
       {
-        label: "Database",
-        value: titleCase(stats.health.database),
-        meta: "Persistence layer",
-        tone: getStatusTone(stats.health.database),
+        label: "Socket Gateway",
+        value: titleCase(socketState.connectionStatus),
+        meta:
+          socketState.connectionStatus === "connected"
+            ? "Live dashboard subscription active"
+            : socketState.lastError || "Waiting for live channel",
+        tone: getStatusTone(
+          socketState.connectionStatus === "connected"
+            ? "connected"
+            : socketState.connectionStatus
+        ),
       },
       {
-        label: "Network IDS",
-        value: titleCase(stats.health.snort),
-        meta: stats.health.snortLastEventAt
-          ? `Last IDS event ${formatTime(stats.health.snortLastEventAt)}`
-          : "Waiting for IDS data",
-        tone: getStatusTone(stats.health.snort),
+        label: "Database",
+        value: titleCase(stats.health.database),
+        meta: "Telemetry persistence layer",
+        tone: getStatusTone(stats.health.database),
       },
       {
         label: "IDS Engine",
@@ -920,9 +915,7 @@ const Dashboard = () => {
       },
       {
         label: "Event Stream",
-        value: stats.health.stream.connected
-          ? titleCase(stats.health.stream.mode)
-          : "Fallback",
+        value: stats.health.stream.connected ? titleCase(stats.health.stream.mode) : "Fallback",
         meta: stats.health.stream.lastPublishedAt
           ? `Last publish ${formatTime(stats.health.stream.lastPublishedAt)}`
           : "Waiting for stream events",
@@ -932,33 +925,44 @@ const Dashboard = () => {
     [socketState.connectionStatus, socketState.lastError, stats]
   );
 
-  const alertSeverities = useMemo(
+  const severityChartData = useMemo(
     () => [
-      {
-        label: "Critical",
-        value: stats.criticalSeverity,
-        color: SEVERITY_COLORS.Critical,
-      },
-      {
-        label: "High",
-        value: stats.highSeverity,
-        color: SEVERITY_COLORS.High,
-      },
-      {
-        label: "Medium",
-        value: stats.mediumSeverity,
-        color: SEVERITY_COLORS.Medium,
-      },
-      {
-        label: "Low",
-        value: stats.lowSeverity,
-        color: SEVERITY_COLORS.Low,
-      },
-    ],
+      { name: "Critical", value: stats.criticalSeverity },
+      { name: "High", value: stats.highSeverity },
+      { name: "Medium", value: stats.mediumSeverity },
+      { name: "Low", value: stats.lowSeverity },
+    ].filter((item) => item.value > 0),
     [stats]
   );
 
-  const healthTone = getStatusTone(stats.health.snort);
+  const hostActivityMix = useMemo(
+    () =>
+      safeArray(stats.hostInsights?.hostActivityMix).map((item) => ({
+        ...item,
+        name: shortenLabel(item.name, 18),
+      })),
+    [stats]
+  );
+
+  const topHosts = useMemo(
+    () =>
+      safeArray(stats.hostInsights?.topHosts).map((item) => ({
+        ...item,
+        name: shortenLabel(item.name, 18),
+      })),
+    [stats]
+  );
+
+  const recentHostLogs = useMemo(
+    () =>
+      stats.recentLogs
+        .filter((log) => log.derivedSensorType === "host")
+        .slice(0, 8),
+    [stats.recentLogs]
+  );
+
+  const showNetworkPanels = stats.traffic.networkCoverage.total > 0 || stats.protocolDistribution.length > 0;
+  const healthTone = getStatusTone(stats.health.host);
 
   if (loading) {
     return (
@@ -972,35 +976,22 @@ const Dashboard = () => {
     <MainLayout>
       <section className="dashboard-hero">
         <div className="dashboard-hero__left">
-          <div className="command-eyebrow">
-            ThreatLens / SOC / Real-Time Operations
-          </div>
+          <div className="command-eyebrow">ThreatLens / HIDS / Real-Time Host Operations</div>
           <h1>Threat Operations Dashboard</h1>
           <p>
-            Live visibility across host telemetry, correlated incidents, supporting IDS signals, and platform health.
+            Live visibility across host telemetry, endpoint health, real-time detections, and platform readiness.
           </p>
           <div className="dashboard-hero__meta">
-            <span>
-              Last updated:{" "}
-              {lastUpdated ? lastUpdated.toLocaleTimeString() : "Never"}
-            </span>
-            <span>
-              Last detection: {formatTime(stats.health.lastDetectionTime)}
-            </span>
-            <span>
-              Last heartbeat: {formatTime(stats.health.collector.lastHeartbeatAt)}
-            </span>
-            <span>
-              Last host event: {formatTime(stats.health.hostLastEventAt)}
-            </span>
+            <span>Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "Never"}</span>
+            <span>Last detection: {formatTime(stats.health.lastDetectionTime)}</span>
+            <span>Last heartbeat: {formatTime(stats.health.collector.lastHeartbeatAt)}</span>
+            <span>Last host event: {formatTime(stats.health.hostLastEventAt)}</span>
           </div>
         </div>
 
         <div className={`status-pill ${healthTone}`}>
           <span className="status-dot" />
-          {stats.mode === "live-monitoring"
-            ? "Live monitoring active"
-            : "Waiting for telemetry"}
+          {stats.mode === "live-monitoring" ? "Live monitoring active" : "Waiting for telemetry"}
         </div>
       </section>
 
@@ -1017,7 +1008,7 @@ const Dashboard = () => {
       </section>
 
       <section className="ops-strip">
-        {controlCards.map((card) => (
+        {hostHealthCards.map((card) => (
           <div key={card.label} className={`ops-card ops-card--${card.tone}`}>
             <span className="ops-card__label">{card.label}</span>
             <strong>{card.value}</strong>
@@ -1027,60 +1018,46 @@ const Dashboard = () => {
       </section>
 
       <section className="severity-strip">
-        {alertSeverities.map((item) => {
-          const totalSeverity =
-            stats.criticalSeverity +
-            stats.highSeverity +
-            stats.mediumSeverity +
-            stats.lowSeverity;
-
-          const percent =
-            totalSeverity > 0 ? (item.value / totalSeverity) * 100 : 0;
-
-          return (
-            <div key={item.label} className="severity-panel">
-              <div className="severity-head">
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-              </div>
-              <div className="severity-progress">
-                <span
-                  style={{
-                    width: `${Math.max(8, Math.min(100, percent || 8))}%`,
-                    background: item.color,
-                  }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </section>
-
-      <section className="metrics-grid metrics-grid--equal">
-        {overviewMetrics.map((item) => (
-          <div key={item.label} className="metric-card metric-card--fixed">
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-            <small>{item.note}</small>
+        <div className="dashboard-panel severity-chart-panel">
+          <div className="panel-header">
+            <h3>Alert Severity Mix</h3>
+            <span>Live detection distribution</span>
           </div>
-        ))}
-      </section>
-
-      <section className="metrics-grid telemetry-quality-grid">
-        {telemetryQualityMetrics.map((item) => (
-          <div key={item.label} className="metric-card metric-card--subtle">
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-            <small>{item.note}</small>
+          <div className="panel-chart panel-chart--sm">
+            {severityChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={severityChartData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={56}
+                    outerRadius={86}
+                    paddingAngle={4}
+                  >
+                    {severityChartData.map((entry) => (
+                      <Cell key={entry.name} fill={getSeverityTone(entry.name)} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="empty-state">No alerts yet</div>
+            )}
           </div>
-        ))}
-      </section>
-
-      <section className="dashboard-grid dashboard-grid--premium">
-        <div className="panel-span-2">
-          <LiveTerminal logs={liveLogs} />
         </div>
-        <LiveOpsFeed events={liveOpsFeed} />
+
+        {overviewMetrics.map((item) => (
+          <div key={item.label} className="severity-panel metric-emphasis">
+            <div className="severity-head">
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </div>
+            <small>{item.note}</small>
+          </div>
+        ))}
       </section>
 
       <section className="dashboard-grid dashboard-grid--premium">
@@ -1092,34 +1069,14 @@ const Dashboard = () => {
           <div className="panel-chart panel-chart--lg">
             {stats.timeline.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={stats.timeline}
-                  margin={{ top: 12, right: 16, left: 0, bottom: 0 }}
-                >
+                <AreaChart data={stats.timeline} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
                   <defs>
-                    <linearGradient
-                      id="eventsGradient"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="5%"
-                        stopColor="#48cae4"
-                        stopOpacity={0.85}
-                      />
-                      <stop
-                        offset="95%"
-                        stopColor="#48cae4"
-                        stopOpacity={0.05}
-                      />
+                    <linearGradient id="eventsGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#48cae4" stopOpacity={0.85} />
+                      <stop offset="95%" stopColor="#48cae4" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="rgba(255,255,255,0.08)"
-                  />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                   <XAxis dataKey="time" stroke="#93a4c3" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#93a4c3" tick={{ fontSize: 11 }} allowDecimals={false} />
                   <Tooltip />
@@ -1141,159 +1098,34 @@ const Dashboard = () => {
 
         <div className="dashboard-panel">
           <div className="panel-header">
-            <h3>Protocol Mix</h3>
-            <span>Observed traffic families</span>
-          </div>
-          <div className="panel-chart panel-chart--protocol">
-            {stats.protocolDistribution.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={stats.protocolDistribution}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={52}
-                    outerRadius={82}
-                    paddingAngle={3}
-                  >
-                    {stats.protocolDistribution.map((entry, index) => (
-                      <Cell
-                        key={`${entry.name}-${index}`}
-                        fill={PROTOCOL_COLORS[index % PROTOCOL_COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p>No enriched network protocol telemetry yet.</p>
-            )}
-          </div>
-          <div className="panel-footnote">
-            {stats.traffic.networkCoverage.total > 0
-              ? `${formatCompact(stats.traffic.networkCoverage.unknownProtocol)} network events are missing protocol metadata.`
-              : "NIDS is not active yet, so protocol coverage is not available."}
-          </div>
-        </div>
-
-        <div className="dashboard-panel">
-          <div className="panel-header">
-            <h3>Top Threats</h3>
-            <span>Most frequent detections</span>
+            <h3>Host Activity Mix</h3>
+            <span>Most common host behaviors</span>
           </div>
           <div className="panel-chart">
-            {stats.topAttackTypes.length > 0 ? (
+            {hostActivityMix.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={stats.topAttackTypes}
-                  layout="vertical"
-                  margin={{ top: 4, right: 18, left: 32, bottom: 4 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="rgba(255,255,255,0.08)"
-                  />
-                  <XAxis type="number" stroke="#93a4c3" />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    tickFormatter={(value) => shortenLabel(value, 20)}
-                    stroke="#93a4c3"
-                    width={150}
-                    tick={{ fontSize: 11 }}
-                  />
+                <BarChart data={hostActivityMix} layout="vertical" margin={{ top: 8, right: 12, left: 12, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                  <XAxis type="number" stroke="#93a4c3" allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" stroke="#93a4c3" width={140} tick={{ fontSize: 11 }} />
                   <Tooltip />
-                  <Bar
-                    dataKey="value"
-                    fill="#7dd3fc"
-                    radius={[0, 8, 8, 0]}
-                  />
+                  <Bar dataKey="value" fill="#7dd3fc" radius={[0, 10, 10, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <p>No threat activity recorded yet.</p>
+              <p>No host activity telemetry yet.</p>
             )}
           </div>
         </div>
 
-        <div className="dashboard-panel">
-          <div className="panel-header">
-            <h3>Alert Source</h3>
-            <span>Snort, ML, and rule engine mix</span>
-          </div>
-          <div className="panel-chart">
-            {stats.alertSourceDistribution.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={stats.alertSourceDistribution}
-                  layout="vertical"
-                  margin={{ top: 4, right: 18, left: 24, bottom: 4 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="rgba(255,255,255,0.08)"
-                  />
-                  <XAxis type="number" allowDecimals={false} stroke="#93a4c3" />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    stroke="#93a4c3"
-                    width={120}
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={(value) => shortenLabel(titleCase(value), 16)}
-                  />
-                  <Tooltip
-                    formatter={(value) => [value, "Alerts"]}
-                    labelFormatter={titleCase}
-                  />
-                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>
-                    {stats.alertSourceDistribution.map((entry, index) => (
-                      <Cell
-                        key={`${entry.name}-${index}`}
-                        fill={SOURCE_COLORS[index % SOURCE_COLORS.length]}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p>No alert source data yet.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="dashboard-panel">
-          <div className="panel-header">
-            <h3>Most Targeted Services</h3>
-            <span>Destination port concentration</span>
-          </div>
-          <div className="panel-list">
-            {stats.topPorts.length > 0 ? (
-              stats.topPorts.map((item, index) => (
-                <div
-                  key={`${item.name}-${index}`}
-                  className="list-row list-row--pill"
-                >
-                  <span className="mono-text">{item.name}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))
-            ) : (
-              <p>No enriched service telemetry yet.</p>
-            )}
-          </div>
-          <div className="panel-footnote">
-            {stats.traffic.networkCoverage.total > 0
-              ? `${formatCompact(stats.traffic.networkCoverage.unknownPort)} network events have no destination port.`
-              : "NIDS is not active yet, so service and port coverage are not available."}
-          </div>
+        <div className="panel-span-2">
+          <LiveTerminal logs={liveLogs.length ? liveLogs : recentHostLogs} />
         </div>
 
         <div className="dashboard-panel">
           <div className="panel-header">
             <h3>Live Operations Feed</h3>
-            <span>Socket and stream pipeline activity</span>
+            <span>Socket and ingestion activity</span>
           </div>
           <div className="panel-list">
             {liveOpsFeed.length > 0 ? (
@@ -1312,7 +1144,26 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="dashboard-panel recent-alerts-panel">
+        <div className="dashboard-panel">
+          <div className="panel-header">
+            <h3>Top Hosts</h3>
+            <span>Most active monitored endpoints</span>
+          </div>
+          <div className="panel-list">
+            {topHosts.length > 0 ? (
+              topHosts.map((item, index) => (
+                <div key={`${item.name}-${index}`} className="list-row list-row--pill">
+                  <span>{item.name}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))
+            ) : (
+              <p>No host distribution data yet.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="dashboard-panel">
           <div className="panel-header">
             <h3>Recent Alerts</h3>
             <span>Latest correlated detections</span>
@@ -1325,12 +1176,17 @@ const Dashboard = () => {
                   className="list-row list-row-stack recent-alert-card"
                 >
                   <div className="list-row__top">
-                    <span>{alert.type || alert.attackType || "Threat"}</span>
-                    <strong>{alert.severity || "Unknown"}</strong>
+                    <span>{alert.type || alert.attackType || alert.title || "Threat"}</span>
+                    <strong
+                      style={{
+                        color: getSeverityTone(alert.severity || "unknown"),
+                      }}
+                    >
+                      {titleCase(alert.severity || "unknown")}
+                    </strong>
                   </div>
                   <div className="list-meta">
-                    {titleCase(alert.source || "unknown")} •{" "}
-                    {alert.ip || "Unknown IP"} • {formatTime(alert.timestamp)}
+                    {titleCase(alert.source || "unknown")} • {alert.ip || "Unknown IP"} • {formatTime(alert.timestamp)}
                   </div>
                 </div>
               ))
@@ -1342,47 +1198,106 @@ const Dashboard = () => {
 
         <div className="dashboard-panel">
           <div className="panel-header">
-            <h3>Top Source IPs</h3>
-            <span>Most active senders</span>
+            <h3>Recent Host Telemetry</h3>
+            <span>Latest endpoint events</span>
           </div>
           <div className="panel-list">
-            {stats.topSourceIps.length > 0 ? (
-              stats.topSourceIps.map((item, index) => (
-                <div
-                  key={`${item.name}-${index}`}
-                  className="list-row list-row--pill"
-                >
-                  <span className="mono-text">{item.name}</span>
-                  <strong>{item.value}</strong>
+            {recentHostLogs.length > 0 ? (
+              recentHostLogs.map((log, index) => (
+                <div key={log._id || index} className="list-row list-row-stack recent-alert-card">
+                  <div className="list-row__top">
+                    <span>{shortenLabel(log.derivedMessage, 34)}</span>
+                    <strong style={{ color: getSeverityTone(log.derivedSeverity) }}>
+                      {titleCase(log.derivedSeverity)}
+                    </strong>
+                  </div>
+                  <div className="list-meta">
+                    {log.derivedClassification} • {log.derivedHost} • {formatTime(log.timestamp)}
+                  </div>
                 </div>
               ))
             ) : (
-              <p>No source IP data yet.</p>
+              <p>No host telemetry yet.</p>
             )}
           </div>
         </div>
 
-        <div className="dashboard-panel">
-          <div className="panel-header">
-            <h3>Top Destination IPs</h3>
-            <span>Most targeted hosts</span>
-          </div>
-          <div className="panel-list">
-            {stats.topDestinationIps.length > 0 ? (
-              stats.topDestinationIps.map((item, index) => (
-                <div
-                  key={`${item.name}-${index}`}
-                  className="list-row list-row--pill"
-                >
-                  <span className="mono-text">{item.name}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))
-            ) : (
-              <p>No destination IP data yet.</p>
-            )}
-          </div>
-        </div>
+        {showNetworkPanels && (
+          <>
+            <div className="dashboard-panel">
+              <div className="panel-header">
+                <h3>Protocol Mix</h3>
+                <span>Observed traffic families</span>
+              </div>
+              <div className="panel-chart panel-chart--protocol">
+                {stats.protocolDistribution.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={stats.protocolDistribution}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={52}
+                        outerRadius={82}
+                        paddingAngle={3}
+                      >
+                        {stats.protocolDistribution.map((entry, index) => (
+                          <Cell key={`${entry.name}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p>No enriched network protocol telemetry yet.</p>
+                )}
+              </div>
+              <div className="panel-footnote">
+                {stats.traffic.networkCoverage.total > 0
+                  ? `${formatCompact(stats.traffic.networkCoverage.unknownProtocol)} network events are missing protocol metadata.`
+                  : "NIDS is not active yet."}
+              </div>
+            </div>
+
+            <div className="dashboard-panel">
+              <div className="panel-header">
+                <h3>Top Source IPs</h3>
+                <span>Most active senders</span>
+              </div>
+              <div className="panel-list">
+                {stats.topSourceIps.length > 0 ? (
+                  stats.topSourceIps.map((item, index) => (
+                    <div key={`${item.name}-${index}`} className="list-row list-row--pill">
+                      <span className="mono-text">{item.name}</span>
+                      <strong>{item.value}</strong>
+                    </div>
+                  ))
+                ) : (
+                  <p>No source IP data yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="dashboard-panel">
+              <div className="panel-header">
+                <h3>Top Destination IPs</h3>
+                <span>Most targeted hosts</span>
+              </div>
+              <div className="panel-list">
+                {stats.topDestinationIps.length > 0 ? (
+                  stats.topDestinationIps.map((item, index) => (
+                    <div key={`${item.name}-${index}`} className="list-row list-row--pill">
+                      <span className="mono-text">{item.name}</span>
+                      <strong>{item.value}</strong>
+                    </div>
+                  ))
+                ) : (
+                  <p>No destination IP data yet.</p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="dashboard-panel panel-span-3">
           <div className="panel-header">
@@ -1395,12 +1310,13 @@ const Dashboard = () => {
                 <thead>
                   <tr>
                     <th>Event</th>
-                    <th>Protocol</th>
+                    <th>Type</th>
                     <th>Classification</th>
-                    <th>Priority</th>
-                    <th>Source IP</th>
-                    <th>Destination IP</th>
-                    <th>Destination Port</th>
+                    <th>Severity</th>
+                    <th>Host / Source</th>
+                    <th>Protocol</th>
+                    <th>Destination</th>
+                    <th>Port</th>
                     <th>Timestamp</th>
                   </tr>
                 </thead>
@@ -1408,10 +1324,20 @@ const Dashboard = () => {
                   {stats.recentLogs.map((log, index) => (
                     <tr key={log._id || index}>
                       <td>{log.derivedMessage}</td>
-                      <td>{log.derivedProtocol}</td>
+                      <td>{titleCase(log.derivedSensorType)}</td>
                       <td>{log.derivedClassification}</td>
-                      <td>{log.derivedPriority || "-"}</td>
-                      <td className="mono-text">{log.derivedSrcIp}</td>
+                      <td>
+                        <span
+                          className="severity-badge"
+                          style={{ background: `${getSeverityTone(log.derivedSeverity)}22`, color: getSeverityTone(log.derivedSeverity), borderColor: `${getSeverityTone(log.derivedSeverity)}55` }}
+                        >
+                          {titleCase(log.derivedSeverity)}
+                        </span>
+                      </td>
+                      <td className="mono-text">
+                        {log.derivedSensorType === "host" ? log.derivedHost : log.derivedSrcIp}
+                      </td>
+                      <td>{log.derivedProtocol}</td>
                       <td className="mono-text">{log.derivedDestIp}</td>
                       <td className="mono-text">{log.derivedDestPort}</td>
                       <td>{formatDateTime(log.timestamp)}</td>

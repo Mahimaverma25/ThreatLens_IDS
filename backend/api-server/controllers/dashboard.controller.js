@@ -71,6 +71,7 @@ const getProtocol = (log) => {
   return (
     log?.metadata?.protocol ||
     log?.metadata?.appProtocol ||
+    log?.metadata?.network?.protocol ||
     log?.metadata?.snort?.protocol ||
     log?.protocol ||
     "Unknown"
@@ -89,6 +90,7 @@ const getMessage = (log) => {
 const getSrcIp = (log) => {
   return (
     log?.metadata?.snort?.srcIp ||
+    log?.metadata?.network?.sourceIp ||
     log?.ip ||
     log?.metadata?.sourceIp ||
     log?.sourceIp ||
@@ -99,6 +101,7 @@ const getSrcIp = (log) => {
 const getDestIp = (log) => {
   return (
     log?.metadata?.snort?.destIp ||
+    log?.metadata?.network?.destinationIp ||
     log?.metadata?.destinationIp ||
     log?.destinationIp ||
     "Unknown"
@@ -110,8 +113,10 @@ const getDestPort = (log) => {
 
   const rawPort =
     log?.metadata?.snort?.destPort ??
+    log?.metadata?.network?.destinationPort ??
     log?.metadata?.destinationPort ??
     log?.metadata?.port ??
+    log?.metadata?.network?.port ??
     log?.destPort ??
     log?.destinationPort ??
     null;
@@ -303,6 +308,319 @@ const normalizeIdsEngineHealth = (idsEngine) => {
     version: raw?.version || null,
     message: raw?.message || null
   };
+};
+
+const startOfDay = (value = new Date()) => {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const startOfWeek = (value = new Date()) => {
+  const date = startOfDay(value);
+  const day = date.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - diff);
+  return date;
+};
+
+const buildEndpointRiskRows = (assets, recentAlerts, heartbeats) => {
+  const alertsByAsset = recentAlerts.reduce((accumulator, alert) => {
+    const assetId = alert?._asset_id?.toString?.();
+    if (!assetId) return accumulator;
+
+    accumulator[assetId] = accumulator[assetId] || [];
+    accumulator[assetId].push(alert);
+    return accumulator;
+  }, {});
+
+  const heartbeatByAsset = heartbeats.reduce((accumulator, heartbeat) => {
+    const assetId = heartbeat?._asset_id?.toString?.();
+    if (!assetId || accumulator[assetId]) return accumulator;
+    accumulator[assetId] = heartbeat;
+    return accumulator;
+  }, {});
+
+  const severityWeights = {
+    critical: 40,
+    high: 24,
+    medium: 12,
+    low: 6
+  };
+
+  return assets
+    .map((asset) => {
+      const assetId = asset?._id?.toString?.();
+      const assetAlerts = alertsByAsset[assetId] || [];
+      const heartbeat = heartbeatByAsset[assetId];
+      const telemetryTypes = Array.isArray(asset.telemetry_types) ? asset.telemetry_types : [];
+      const coverageScore = Math.min(100, telemetryTypes.length * 20 + (heartbeat ? 15 : 0));
+      const riskScore = Math.min(
+        100,
+        assetAlerts.reduce((sum, alert) => {
+          const weight = severityWeights[normalizeText(alert?.severity).toLowerCase()] || 4;
+          return sum + weight;
+        }, asset.agent_status === "online" ? 10 : 24)
+      );
+
+      const highestSeverity =
+        assetAlerts
+          .map((alert) => normalizeText(alert?.severity).toLowerCase())
+          .find((severity) => ["critical", "high", "medium", "low"].includes(severity)) || "low";
+
+      return {
+        assetId: asset.asset_id,
+        hostname: asset.hostname || asset.asset_name || asset.asset_id,
+        platform: asset.host_platform || "Unknown",
+        environment: asset.asset_environment || "production",
+        status: asset.agent_status || "offline",
+        coverageScore,
+        riskScore,
+        openAlerts: assetAlerts.length,
+        highestSeverity,
+        lastSeenAt: asset.agent_last_seen || heartbeat?.receivedAt || null,
+        telemetryTypes
+      };
+    })
+    .sort((left, right) => right.riskScore - left.riskScore)
+    .slice(0, 8);
+};
+
+const buildKillChainCoverage = (logs, alerts) => {
+  const stages = [
+    {
+      key: "Initial Access",
+      matcher: (value) =>
+        /(initial access|phishing|login|brute|credential|auth)/i.test(value)
+    },
+    {
+      key: "Execution",
+      matcher: (value) =>
+        /(execution|process|powershell|cmd|script|wmic)/i.test(value)
+    },
+    {
+      key: "Persistence",
+      matcher: (value) =>
+        /(persistence|startup|service|registry|autorun)/i.test(value)
+    },
+    {
+      key: "Privilege Escalation",
+      matcher: (value) =>
+        /(privilege|sudo|admin|escalat)/i.test(value)
+    },
+    {
+      key: "Defense Evasion",
+      matcher: (value) =>
+        /(defense evasion|disable|tamper|evasion|obfusc)/i.test(value)
+    },
+    {
+      key: "Discovery",
+      matcher: (value) =>
+        /(discovery|recon|scan|enumerat|inventory)/i.test(value)
+    },
+    {
+      key: "Lateral Movement",
+      matcher: (value) =>
+        /(lateral|remote|smb|rdp|psexec|pivot)/i.test(value)
+    },
+    {
+      key: "Exfiltration",
+      matcher: (value) =>
+        /(exfil|download|upload|dns tunnel|leak)/i.test(value)
+    }
+  ];
+
+  const corpus = [
+    ...logs.map((log) =>
+      [
+        getMessage(log),
+        deriveClassification(log),
+        normalizeText(log?.eventType)
+      ].join(" ")
+    ),
+    ...alerts.map((alert) =>
+      [
+        normalizeText(alert?.type),
+        normalizeText(alert?.attackType),
+        normalizeText(alert?.metadata?.classification)
+      ].join(" ")
+    )
+  ];
+
+  return stages.map((stage) => {
+    const hits = corpus.filter((item) => stage.matcher(item)).length;
+    return {
+      stage: stage.key,
+      detections: hits,
+      coverage: Math.min(100, hits * 12 + (hits > 0 ? 18 : 0))
+    };
+  });
+};
+
+const buildIncidentMatrix = (alerts) => {
+  const severities = ["Critical", "High", "Medium", "Low"];
+  const statuses = ["New", "Acknowledged", "Investigating", "Resolved"];
+
+  return severities.flatMap((severity) =>
+    statuses.map((status) => ({
+      severity,
+      status,
+      value: alerts.filter(
+        (alert) => normalizeText(alert?.severity) === severity && normalizeText(alert?.status) === status
+      ).length
+    }))
+  );
+};
+
+const getOverview = async (req, res) => {
+  try {
+    const orgFilter = { _org_id: req.orgId };
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - TIME_WINDOW_HOURS * 60 * 60 * 1000);
+    const dayStart = startOfDay(now);
+    const weekStart = startOfWeek(now);
+    const recentHeartbeatWindow = new Date(now.getTime() - AGENT_STATUS_WINDOW_MINS * 60 * 1000);
+
+    const telemetryLogFilter = {
+      ...orgFilter,
+      ...buildTelemetryLogMatch()
+    };
+
+    const hostTelemetryFilter = {
+      ...orgFilter,
+      ...buildHostLogMatch()
+    };
+
+    const detectionAlertFilter = {
+      ...orgFilter,
+      source: { $in: DETECTION_ALERT_SOURCES }
+    };
+
+    const [
+      assets,
+      recentAlerts,
+      recentLogsRaw,
+      hostLogsRaw,
+      heartbeats,
+      alertTotal,
+      totalAssets,
+      onlineAssets,
+      resolvedToday,
+      newToday
+    ] = await Promise.all([
+      Asset.find(orgFilter).sort({ agent_last_seen: -1 }).limit(50),
+      Alert.find({ ...detectionAlertFilter, timestamp: { $gte: weekStart } }).sort({ timestamp: -1 }).limit(300),
+      Log.find({ ...telemetryLogFilter, timestamp: { $gte: oneDayAgo } }).sort({ timestamp: -1 }).limit(500),
+      Log.find({ ...hostTelemetryFilter, timestamp: { $gte: oneDayAgo } }).sort({ timestamp: -1 }).limit(300),
+      AgentHeartbeat.find({ ...orgFilter, receivedAt: { $gte: weekStart } }).sort({ receivedAt: -1 }).limit(200),
+      Alert.countDocuments({ ...detectionAlertFilter, timestamp: { $gte: oneDayAgo } }),
+      Asset.countDocuments(orgFilter),
+      Asset.countDocuments({
+        ...orgFilter,
+        agent_status: "online",
+        agent_last_seen: { $gte: recentHeartbeatWindow }
+      }),
+      Alert.countDocuments({
+        ...detectionAlertFilter,
+        status: "Resolved",
+        resolvedAt: { $gte: dayStart }
+      }),
+      Alert.countDocuments({
+        ...detectionAlertFilter,
+        timestamp: { $gte: dayStart }
+      })
+    ]);
+
+    const recentLogs = recentLogsRaw.map(normalizeLog);
+    const hostLogs = hostLogsRaw.map(normalizeLog);
+    const alertStatusDistribution = groupCounts(recentAlerts, (alert) => alert?.status || "New", 8);
+    const topClassifications = groupCounts(
+      recentAlerts,
+      (alert) => alert?.attackType || alert?.type || alert?.metadata?.classification,
+      6
+    );
+    const topHosts = groupCounts(
+      hostLogs,
+      (log) => log?.metadata?.hostname || log?.metadata?.host || log?._asset_id || "Unknown Host",
+      6
+    );
+    const topTalkers = groupCounts(recentLogs.filter(hasDerivedSrcIp), (log) => log?.derived?.srcIp, 6);
+    const topTargets = groupCounts(recentLogs.filter(hasDerivedDestIp), (log) => log?.derived?.destIp, 6);
+    const recentCritical = recentAlerts.filter((alert) => normalizeText(alert?.severity).toLowerCase() === "critical").length;
+    const recentHigh = recentAlerts.filter((alert) => normalizeText(alert?.severity).toLowerCase() === "high").length;
+    const suspiciousCommands = hostLogs.filter((log) =>
+      /(powershell|encodedcommand|wmic|cmd\.exe|regsvr32|rundll32)/i.test(getMessage(log))
+    ).length;
+    const fileIntegrityChanges = hostLogs.filter((log) =>
+      /(file|integrity|watch)/i.test(deriveClassification(log))
+    ).length;
+    const authenticationSignals = hostLogs.filter((log) =>
+      /(auth|login|credential|brute)/i.test(`${getMessage(log)} ${deriveClassification(log)}`)
+    ).length;
+    const openIncidents = recentAlerts.filter((alert) => normalizeText(alert?.status).toLowerCase() !== "resolved").length;
+
+    return res.json({
+      generatedAt: now.toISOString(),
+      executive: {
+        monitoredEndpoints: totalAssets,
+        onlineEndpoints: onlineAssets,
+        alertsLast24h: alertTotal,
+        detectionsToday: newToday,
+        resolvedToday,
+        openIncidents,
+        telemetryEventsLast24h: recentLogs.length,
+        hostEventsLast24h: hostLogs.length
+      },
+      posture: {
+        criticalAlerts: recentCritical,
+        highAlerts: recentHigh,
+        suspiciousCommands,
+        fileIntegrityChanges,
+        authenticationSignals,
+        sensorCoveragePercent: totalAssets > 0 ? Math.round((onlineAssets / totalAssets) * 100) : 0
+      },
+      detections: {
+        timeline: buildTimelineBuckets(recentLogs),
+        statusDistribution: alertStatusDistribution,
+        topClassifications,
+        topTalkers,
+        topTargets
+      },
+      endpoints: {
+        riskTable: buildEndpointRiskRows(assets, recentAlerts, heartbeats),
+        topHosts
+      },
+      integrity: {
+        telemetryCoverage: buildTelemetryCoverage(recentLogs),
+        protocolDistribution: groupCounts(
+          recentLogs.filter(hasDerivedProtocol),
+          (log) => log?.derived?.protocol,
+          6
+        ),
+        topPorts: groupCounts(
+          recentLogs.filter(hasDerivedPort),
+          (log) => log?.derived?.destPort,
+          8
+        )
+      },
+      operations: {
+        killChainCoverage: buildKillChainCoverage(recentLogs, recentAlerts),
+        incidentMatrix: buildIncidentMatrix(recentAlerts),
+        liveFeed: recentLogs.slice(0, 10).map((log) => ({
+          id: log._id,
+          timestamp: log.timestamp,
+          title: getMessage(log),
+          classification: log?.derived?.classification,
+          source: log?.source || log?.metadata?.sensorType || "unknown",
+          severity: normalizeText(log?.severity || log?.level || "info").toLowerCase(),
+          host: log?.metadata?.hostname || log?.metadata?.host || "Unknown Host"
+        }))
+      }
+    });
+  } catch (error) {
+    console.error("dashboard getOverview error:", error);
+    return res.status(500).json({ message: "Failed to fetch dashboard overview" });
+  }
 };
 
 const getStats = async (req, res) => {
@@ -650,4 +968,4 @@ const getHealth = async (req, res) => {
   }
 };
 
-module.exports = { getStats, getHealth };
+module.exports = { getStats, getHealth, getOverview };

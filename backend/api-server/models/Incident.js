@@ -1,104 +1,284 @@
 const mongoose = require("mongoose");
 
+const IncidentNoteSchema = new mongoose.Schema(
+  {
+    note: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const IncidentTimelineSchema = new mongoose.Schema(
+  {
+    action: { type: String, required: true, trim: true },
+    details: { type: String, default: "", trim: true },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    automatic: { type: Boolean, default: false },
+    timestamp: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const IncidentSchema = new mongoose.Schema({
   _org_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Organization",
     required: true,
-    index: true
+    index: true,
   },
 
   incidentId: {
     type: String,
     required: true,
     unique: true,
-    index: true
+    index: true,
+    trim: true,
   },
 
   title: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
   },
 
   description: {
     type: String,
     trim: true,
-    default: ""
+    default: "",
+  },
+
+  summary: {
+    type: String,
+    trim: true,
+    default: "",
   },
 
   severity: {
     type: String,
     enum: ["Low", "Medium", "High", "Critical"],
     required: true,
-    index: true
+    index: true,
   },
 
   status: {
     type: String,
-    enum: ["Open", "Investigating", "Resolved", "Closed"],
+    enum: [
+      "Open",
+      "Acknowledged",
+      "Investigating",
+      "Contained",
+      "Resolved",
+      "False Positive",
+      "Closed",
+    ],
     default: "Open",
-    index: true
+    index: true,
+  },
+
+  attackType: {
+    type: String,
+    trim: true,
+    default: "",
+    index: true,
+  },
+
+  attackTypes: [{ type: String, trim: true }],
+
+  source: {
+    type: String,
+    trim: true,
+    default: "correlation-engine",
+    index: true,
+  },
+
+  owner: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null,
   },
 
   assignee: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    default: null
+    default: null,
   },
 
-  alerts: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Alert"
-  }],
+  alertIds: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Alert",
+    },
+  ],
 
-  affectedAssets: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Asset"
-  }],
+  alerts: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Alert",
+    },
+  ],
 
-  sourceIps: [{ type: String }],
+  assetIds: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Asset",
+    },
+  ],
 
-  attackTypes: [{ type: String }],
+  affectedAssets: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Asset",
+    },
+  ],
 
-  timeline: [{
-    action: { type: String, required: true },
-    details: { type: String, default: "" },
-    by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    automatic: { type: Boolean, default: false },
-    timestamp: { type: Date, default: Date.now }
-  }],
+  sourceIps: [{ type: String, trim: true }],
+  destinationIps: [{ type: String, trim: true }],
+
+  confidence: {
+    type: Number,
+    default: 0.5,
+    min: 0,
+    max: 1,
+  },
+
+  risk_score: {
+    type: Number,
+    default: 50,
+    min: 0,
+  },
+
+  eventCount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+
+  tags: [{ type: String, trim: true }],
+
+  notes: {
+    type: [IncidentNoteSchema],
+    default: [],
+  },
+
+  timeline: {
+    type: [IncidentTimelineSchema],
+    default: [],
+  },
 
   metadata: {
     type: Object,
-    default: {}
+    default: {},
+  },
+
+  firstSeen: {
+    type: Date,
+    default: Date.now,
+  },
+
+  lastSeen: {
+    type: Date,
+    default: Date.now,
+    index: true,
   },
 
   created_at: {
     type: Date,
     default: Date.now,
     immutable: true,
-    index: true
+    index: true,
   },
 
   updated_at: {
     type: Date,
-    default: Date.now
+    default: Date.now,
+  },
+
+  resolvedAt: {
+    type: Date,
+    default: null,
   },
 
   resolved_at: {
     type: Date,
-    default: null
-  }
+    default: null,
+  },
 });
 
 IncidentSchema.pre("save", function (next) {
   this.updated_at = Date.now();
+
+  if (!this.owner && this.assignee) {
+    this.owner = this.assignee;
+  }
+  if (!this.assignee && this.owner) {
+    this.assignee = this.owner;
+  }
+
+  if ((!this.alertIds || this.alertIds.length === 0) && this.alerts?.length) {
+    this.alertIds = this.alerts;
+  }
+  if ((!this.alerts || this.alerts.length === 0) && this.alertIds?.length) {
+    this.alerts = this.alertIds;
+  }
+
+  if ((!this.assetIds || this.assetIds.length === 0) && this.affectedAssets?.length) {
+    this.assetIds = this.affectedAssets;
+  }
+  if ((!this.affectedAssets || this.affectedAssets.length === 0) && this.assetIds?.length) {
+    this.affectedAssets = this.assetIds;
+  }
+
+  if (!this.attackType && this.attackTypes?.length) {
+    this.attackType = this.attackTypes[0];
+  }
+  if ((!this.attackTypes || this.attackTypes.length === 0) && this.attackType) {
+    this.attackTypes = [this.attackType];
+  }
+
+  if ((!this.notes || this.notes.length === 0) && this.timeline?.length) {
+    this.notes = this.timeline.map((entry) => ({
+      note: entry.details || entry.action,
+      by: entry.by || null,
+      timestamp: entry.timestamp || new Date(),
+    }));
+  }
+
+  if (!this.firstSeen) {
+    this.firstSeen = this.created_at || new Date();
+  }
+  if (!this.lastSeen) {
+    this.lastSeen = this.updated_at || new Date();
+  }
+
+  if (!this.eventCount) {
+    this.eventCount = this.alertIds?.length || this.alerts?.length || 0;
+  }
+
+  if (!this.resolvedAt && this.resolved_at) {
+    this.resolvedAt = this.resolved_at;
+  }
+  if (!this.resolved_at && this.resolvedAt) {
+    this.resolved_at = this.resolvedAt;
+  }
+
   next();
 });
 
 IncidentSchema.index({ _org_id: 1, created_at: -1 });
 IncidentSchema.index({ _org_id: 1, status: 1, severity: 1 });
-IncidentSchema.index({ _org_id: 1, assignee: 1 });
+IncidentSchema.index({ _org_id: 1, owner: 1 });
+IncidentSchema.index({ _org_id: 1, attackType: 1, source: 1, lastSeen: -1 });
 
 module.exports = mongoose.model("Incident", IncidentSchema);

@@ -1,34 +1,36 @@
 import axios from "axios";
-import {
-  getActiveApiBaseUrl,
-  getNextApiBaseUrl,
-  setActiveApiBaseUrl,
-} from "./connection";
+
+/* ================= API BASE URL ================= */
+
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 const api = axios.create({
-  baseURL: getActiveApiBaseUrl(),
-  timeout: 10000,
+  baseURL: API_BASE_URL,
+  timeout: 15000,
   withCredentials: true,
 });
 
 /* ================= TOKEN HELPERS ================= */
 
-const getToken = () => localStorage.getItem("accessToken");
+export const getToken = () => localStorage.getItem("accessToken");
 
-const setToken = (token) => {
-  if (token) {
-    localStorage.setItem("accessToken", token);
-    api.defaults.headers.common.Authorization = `Bearer ${token}`;
-  }
+export const setToken = (token) => {
+  if (!token) return;
+
+  localStorage.setItem("accessToken", token);
+  api.defaults.headers.common.Authorization = `Bearer ${token}`;
 };
 
-const clearToken = () => {
+export const clearToken = () => {
   localStorage.removeItem("accessToken");
+  localStorage.removeItem("user");
   delete api.defaults.headers.common.Authorization;
 };
 
 const bootstrapToken = () => {
   const token = getToken();
+
   if (token) {
     api.defaults.headers.common.Authorization = `Bearer ${token}`;
   }
@@ -38,15 +40,18 @@ bootstrapToken();
 
 /* ================= REQUEST INTERCEPTOR ================= */
 
-api.interceptors.request.use((config) => {
-  const token = getToken();
+api.interceptors.request.use(
+  (config) => {
+    const token = getToken();
 
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
 
-  return config;
-});
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 /* ================= RESPONSE INTERCEPTOR ================= */
 
@@ -54,20 +59,27 @@ let isRefreshing = false;
 let failedQueue = [];
 
 const processQueue = (error, token = null) => {
-  failedQueue.forEach((prom) => {
+  failedQueue.forEach((request) => {
     if (error) {
-      prom.reject(error);
+      request.reject(error);
     } else {
-      prom.resolve(token);
+      request.resolve(token);
     }
   });
+
   failedQueue = [];
 };
 
+const isAuthRoute = (url = "") => {
+  return (
+    url.includes("/auth/login") ||
+    url.includes("/auth/register") ||
+    url.includes("/auth/refresh")
+  );
+};
+
 api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
 
   async (error) => {
     const originalRequest = error.config;
@@ -77,35 +89,20 @@ api.interceptors.response.use(
     }
 
     if (!error.response) {
-      const nextBaseUrl = getNextApiBaseUrl(
-        originalRequest.baseURL || api.defaults.baseURL
+      console.error(
+        `Backend not reachable. Check if API is running at: ${API_BASE_URL}`
       );
-
-      if (
-        nextBaseUrl &&
-        !originalRequest._localFailoverTried &&
-        typeof window !== "undefined"
-      ) {
-        originalRequest._localFailoverTried = true;
-        originalRequest.baseURL = setActiveApiBaseUrl(nextBaseUrl);
-        api.defaults.baseURL = originalRequest.baseURL;
-
-        return api(originalRequest);
-      }
 
       return Promise.reject(error);
     }
 
     const status = error.response.status;
 
-    const isAuthRoute =
-      originalRequest.url?.includes("/auth/login") ||
-      originalRequest.url?.includes("/auth/register") ||
-      originalRequest.url?.includes("/auth/refresh");
-
-    /* ================= HANDLE 401 REFRESH ================= */
-
-    if (status === 401 && !originalRequest._retry && !isAuthRoute) {
+    if (
+      status === 401 &&
+      !originalRequest._retry &&
+      !isAuthRoute(originalRequest.url)
+    ) {
       originalRequest._retry = true;
 
       if (isRefreshing) {
@@ -115,7 +112,7 @@ api.interceptors.response.use(
               originalRequest.headers.Authorization = `Bearer ${token}`;
               resolve(api(originalRequest));
             },
-            reject: (err) => reject(err),
+            reject,
           });
         });
       }
@@ -123,17 +120,19 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const refreshRes = await api.post(
-          "/auth/refresh",
-          {}
-        );
+        const refreshResponse = await api.post("/auth/refresh");
 
-        const newToken = refreshRes.data?.token;
+        const newToken =
+          refreshResponse.data?.token ||
+          refreshResponse.data?.accessToken ||
+          refreshResponse.data?.data?.token ||
+          refreshResponse.data?.data?.accessToken;
 
-        if (!newToken) throw new Error("Refresh token missing");
+        if (!newToken) {
+          throw new Error("No access token returned from refresh endpoint");
+        }
 
         setToken(newToken);
-
         processQueue(null, newToken);
 
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
@@ -141,16 +140,12 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
-
         clearToken();
-        localStorage.removeItem("user");
 
-        // clean logout redirect for protected routes only
-        if (typeof window !== "undefined") {
-          const currentPath = window.location.pathname;
-          if (!["/login", "/register"].includes(currentPath)) {
-            window.location.href = "/login";
-          }
+        const currentPath = window.location.pathname;
+
+        if (!["/login", "/register"].includes(currentPath)) {
+          window.location.href = "/login";
         }
 
         return Promise.reject(refreshError);
@@ -166,11 +161,12 @@ api.interceptors.response.use(
 /* ================= AUTH APIs ================= */
 
 export const auth = {
-  register: (email, password, username) =>
+  register: (email, password, username, role) =>
     api.post("/auth/register", {
       email: email.trim(),
       password: password.trim(),
       username,
+      role,
     }),
 
   login: (email, password) =>
@@ -190,32 +186,60 @@ export const auth = {
 
 export const alerts = {
   list: (limit = 50, page = 1, filters = {}) =>
-    api.get("/alerts", { params: { limit, page, ...filters } }),
+    api.get("/alerts", {
+      params: {
+        limit,
+        page,
+        ...filters,
+      },
+    }),
 
   get: (id) => api.get(`/alerts/${id}`),
 
   update: (id, payload) => api.patch(`/alerts/${id}`, payload),
+
+  scan: () => api.post("/alerts/scan"),
 };
 
 /* ================= LOGS ================= */
 
 export const logs = {
   list: (limit = 50, page = 1, filters = {}) =>
-    api.get("/logs", { params: { limit, page, ...filters } }),
+    api.get("/logs", {
+      params: {
+        limit,
+        page,
+        ...filters,
+      },
+    }),
 
   create: (message, level = "info", source = "frontend", metadata = {}) =>
-    api.post("/logs", { message, level, source, metadata }),
+    api.post("/logs", {
+      message,
+      level,
+      source,
+      metadata,
+    }),
 
   upload: (file) => {
     const formData = new FormData();
     formData.append("file", file);
-    return api.post("/logs/upload", formData);
+
+    return api.post("/logs/upload", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
   },
 
   ingest: (payload, apiKey) =>
     api.post("/logs/ingest", payload, {
-      headers: { "x-api-key": apiKey },
+      headers: {
+        "x-api-key": apiKey,
+      },
     }),
+
+  simulate: () => api.post("/logs/simulate"),
 };
 
 /* ================= DASHBOARD ================= */
@@ -223,71 +247,116 @@ export const logs = {
 export const dashboard = {
   stats: () => api.get("/dashboard/stats"),
   health: () => api.get("/dashboard/health"),
+  overview: () => api.get("/dashboard/overview"),
 };
+
+/* ================= INTEL ================= */
 
 export const intel = {
   threatIntel: () => api.get("/intel/threat-intel"),
   threatMap: () => api.get("/intel/threat-map"),
   modelHealth: () => api.get("/intel/model-health"),
   watchlist: () => api.get("/intel/watchlist"),
+
   createIndicator: (payload) => api.post("/intel/watchlist", payload),
+
   deleteIndicator: (id) => api.delete(`/intel/watchlist/${id}`),
 };
 
+/* ================= INCIDENTS ================= */
+
 export const incidents = {
-  list: (filters = {}) => api.get("/incidents", { params: filters }),
+  list: (filters = {}) =>
+    api.get("/incidents", {
+      params: filters,
+    }),
+
   get: (id) => api.get(`/incidents/${id}`),
+
   update: (id, payload) => api.patch(`/incidents/${id}`, payload),
 };
 
+/* ================= RULES ================= */
+
 export const rules = {
-  list: (filters = {}) => api.get("/rules", { params: filters }),
+  list: (filters = {}) =>
+    api.get("/rules", {
+      params: filters,
+    }),
+
   create: (payload) => api.post("/rules", payload),
+
   update: (id, payload) => api.patch(`/rules/${id}`, payload),
+
   remove: (id) => api.delete(`/rules/${id}`),
 };
 
+/* ================= PLAYBOOKS ================= */
+
 export const playbooks = {
   list: () => api.get("/playbooks"),
+
   execute: (payload) => api.post("/playbooks/execute", payload),
 };
 
+/* ================= REPORTS ================= */
+
 export const reports = {
   summary: () => api.get("/reports"),
+
   exportAlertsCsv: (severity = "") =>
     api.get("/reports/export/alerts.csv", {
       params: severity ? { severity } : {},
       responseType: "blob",
     }),
+
   exportLogsCsv: () =>
     api.get("/reports/export/logs.csv", {
       responseType: "blob",
     }),
 };
 
+/* ================= ASSETS ================= */
+
 export const assets = {
   list: () => api.get("/assets"),
+
   get: (id) => api.get(`/assets/${id}`),
+
   create: (payload) => api.post("/assets", payload),
+
   update: (id, payload) => api.patch(`/assets/${id}`, payload),
-  remove: (id) => api.delete(`/assets/${id}`)
+
+  remove: (id) => api.delete(`/assets/${id}`),
 };
+
+/* ================= AGENTS ================= */
 
 export const agents = {
   register: (payload) => api.post("/agents/register", payload),
+
   heartbeats: () => api.get("/agents/heartbeats"),
 };
 
+/* ================= USERS ================= */
+
 export const users = {
   list: () => api.get("/users"),
-  me: () => api.get("/users/me")
+
+  me: () => api.get("/users/me"),
 };
+
+/* ================= API KEYS ================= */
 
 export const apiKeys = {
   list: () => api.get("/admin/api-keys"),
+
   create: (payload) => api.post("/admin/api-keys", payload),
+
   revoke: (id) => api.delete(`/admin/api-keys/${id}`),
-  rotate: (id, payload = {}) => api.post(`/admin/api-keys/${id}/rotate`, payload)
+
+  rotate: (id, payload = {}) =>
+    api.post(`/admin/api-keys/${id}/rotate`, payload),
 };
 
 export default api;
