@@ -102,6 +102,19 @@ const mergeMetadata = (current = {}, incoming = {}) => {
   return next;
 };
 
+const severityRank = {
+  Low: 1,
+  Medium: 2,
+  High: 3,
+  Critical: 4,
+};
+
+const mergeSeverity = (current, incoming) => {
+  const currentRank = severityRank[current] || 0;
+  const incomingRank = severityRank[incoming] || 0;
+  return incomingRank > currentRank ? incoming : current;
+};
+
 const upsertCorrelatedAlert = async ({
   orgId,
   assetId,
@@ -127,6 +140,9 @@ const upsertCorrelatedAlert = async ({
   });
 
   if (existing) {
+    existing.severity = mergeSeverity(existing.severity, severity);
+    existing.confidence = Math.max(Number(existing.confidence || 0), Number(confidence || 0));
+    existing.risk_score = Math.max(Number(existing.risk_score || 0), Number(risk_score || 0));
     existing.metadata = mergeMetadata(existing.metadata || {}, metadata || {});
     existing.markModified("metadata");
     await existing.save();

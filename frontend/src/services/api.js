@@ -1,7 +1,5 @@
 import axios from "axios";
 
-/* ================= API BASE URL ================= */
-
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
@@ -11,13 +9,10 @@ const api = axios.create({
   withCredentials: true,
 });
 
-/* ================= TOKEN HELPERS ================= */
-
 export const getToken = () => localStorage.getItem("accessToken");
 
 export const setToken = (token) => {
   if (!token) return;
-
   localStorage.setItem("accessToken", token);
   api.defaults.headers.common.Authorization = `Bearer ${token}`;
 };
@@ -28,24 +23,17 @@ export const clearToken = () => {
   delete api.defaults.headers.common.Authorization;
 };
 
-const bootstrapToken = () => {
-  const token = getToken();
-
-  if (token) {
-    api.defaults.headers.common.Authorization = `Bearer ${token}`;
-  }
-};
-
-bootstrapToken();
-
-/* ================= REQUEST INTERCEPTOR ================= */
+const token = getToken();
+if (token) {
+  api.defaults.headers.common.Authorization = `Bearer ${token}`;
+}
 
 api.interceptors.request.use(
   (config) => {
-    const token = getToken();
+    const accessToken = getToken();
 
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     }
 
     return config;
@@ -53,30 +41,22 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-/* ================= RESPONSE INTERCEPTOR ================= */
-
 let isRefreshing = false;
 let failedQueue = [];
 
-const processQueue = (error, token = null) => {
+const processQueue = (error, tokenValue = null) => {
   failedQueue.forEach((request) => {
-    if (error) {
-      request.reject(error);
-    } else {
-      request.resolve(token);
-    }
+    if (error) request.reject(error);
+    else request.resolve(tokenValue);
   });
 
   failedQueue = [];
 };
 
-const isAuthRoute = (url = "") => {
-  return (
-    url.includes("/auth/login") ||
-    url.includes("/auth/register") ||
-    url.includes("/auth/refresh")
-  );
-};
+const isAuthRoute = (url = "") =>
+  url.includes("/auth/login") ||
+  url.includes("/auth/register") ||
+  url.includes("/auth/refresh");
 
 api.interceptors.response.use(
   (response) => response,
@@ -84,15 +64,10 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (!originalRequest) {
-      return Promise.reject(error);
-    }
+    if (!originalRequest) return Promise.reject(error);
 
     if (!error.response) {
-      console.error(
-        `Backend not reachable. Check if API is running at: ${API_BASE_URL}`
-      );
-
+      console.error(`Backend not reachable at ${API_BASE_URL}`);
       return Promise.reject(error);
     }
 
@@ -108,8 +83,8 @@ api.interceptors.response.use(
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({
-            resolve: (token) => {
-              originalRequest.headers.Authorization = `Bearer ${token}`;
+            resolve: (newToken) => {
+              originalRequest.headers.Authorization = `Bearer ${newToken}`;
               resolve(api(originalRequest));
             },
             reject,
@@ -129,22 +104,19 @@ api.interceptors.response.use(
           refreshResponse.data?.data?.accessToken;
 
         if (!newToken) {
-          throw new Error("No access token returned from refresh endpoint");
+          throw new Error("Refresh token did not return access token");
         }
 
         setToken(newToken);
         processQueue(null, newToken);
 
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
-
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
         clearToken();
 
-        const currentPath = window.location.pathname;
-
-        if (!["/login", "/register"].includes(currentPath)) {
+        if (!["/login", "/register"].includes(window.location.pathname)) {
           window.location.href = "/login";
         }
 
@@ -158,7 +130,7 @@ api.interceptors.response.use(
   }
 );
 
-/* ================= AUTH APIs ================= */
+/* ================= AUTH ================= */
 
 export const auth = {
   register: (email, password, username, role) =>
@@ -176,28 +148,26 @@ export const auth = {
     }),
 
   refresh: () => api.post("/auth/refresh"),
-
   logout: () => api.post("/auth/logout"),
-
   me: () => api.get("/auth/me"),
+};
+
+/* ================= DASHBOARD ================= */
+
+export const dashboard = {
+  overview: () => api.get("/dashboard/overview"),
+  stats: () => api.get("/dashboard/stats"),
+  health: () => api.get("/dashboard/health"),
 };
 
 /* ================= ALERTS ================= */
 
 export const alerts = {
   list: (limit = 50, page = 1, filters = {}) =>
-    api.get("/alerts", {
-      params: {
-        limit,
-        page,
-        ...filters,
-      },
-    }),
+    api.get("/alerts", { params: { limit, page, ...filters } }),
 
   get: (id) => api.get(`/alerts/${id}`),
-
   update: (id, payload) => api.patch(`/alerts/${id}`, payload),
-
   scan: () => api.post("/alerts/scan"),
 };
 
@@ -205,101 +175,51 @@ export const alerts = {
 
 export const logs = {
   list: (limit = 50, page = 1, filters = {}) =>
-    api.get("/logs", {
-      params: {
-        limit,
-        page,
-        ...filters,
-      },
-    }),
+    api.get("/logs", { params: { limit, page, ...filters } }),
 
   create: (message, level = "info", source = "frontend", metadata = {}) =>
-    api.post("/logs", {
-      message,
-      level,
-      source,
-      metadata,
-    }),
+    api.post("/logs", { message, level, source, metadata }),
 
   upload: (file) => {
     const formData = new FormData();
     formData.append("file", file);
 
     return api.post("/logs/upload", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+      headers: { "Content-Type": "multipart/form-data" },
     });
   },
 
   ingest: (payload, apiKey) =>
     api.post("/logs/ingest", payload, {
-      headers: {
-        "x-api-key": apiKey,
-      },
+      headers: { "x-api-key": apiKey },
     }),
 
   simulate: () => api.post("/logs/simulate"),
 };
 
-/* ================= DASHBOARD ================= */
-
-export const dashboard = {
-  stats: () => api.get("/dashboard/stats"),
-  health: () => api.get("/dashboard/health"),
-  overview: () => api.get("/dashboard/overview"),
-};
-
-/* ================= INTEL ================= */
+/* ================= OTHER MODULES ================= */
 
 export const intel = {
   threatIntel: () => api.get("/intel/threat-intel"),
   threatMap: () => api.get("/intel/threat-map"),
   modelHealth: () => api.get("/intel/model-health"),
   watchlist: () => api.get("/intel/watchlist"),
-
   createIndicator: (payload) => api.post("/intel/watchlist", payload),
-
   deleteIndicator: (id) => api.delete(`/intel/watchlist/${id}`),
 };
 
-/* ================= INCIDENTS ================= */
-
 export const incidents = {
-  list: (filters = {}) =>
-    api.get("/incidents", {
-      params: filters,
-    }),
-
+  list: (filters = {}) => api.get("/incidents", { params: filters }),
   get: (id) => api.get(`/incidents/${id}`),
-
   update: (id, payload) => api.patch(`/incidents/${id}`, payload),
 };
 
-/* ================= RULES ================= */
-
 export const rules = {
-  list: (filters = {}) =>
-    api.get("/rules", {
-      params: filters,
-    }),
-
+  list: (filters = {}) => api.get("/rules", { params: filters }),
   create: (payload) => api.post("/rules", payload),
-
   update: (id, payload) => api.patch(`/rules/${id}`, payload),
-
   remove: (id) => api.delete(`/rules/${id}`),
 };
-
-/* ================= PLAYBOOKS ================= */
-
-export const playbooks = {
-  list: () => api.get("/playbooks"),
-
-  execute: (payload) => api.post("/playbooks/execute", payload),
-};
-
-/* ================= REPORTS ================= */
 
 export const reports = {
   summary: () => api.get("/reports"),
@@ -316,47 +236,35 @@ export const reports = {
     }),
 };
 
-/* ================= ASSETS ================= */
-
 export const assets = {
   list: () => api.get("/assets"),
-
   get: (id) => api.get(`/assets/${id}`),
-
   create: (payload) => api.post("/assets", payload),
-
   update: (id, payload) => api.patch(`/assets/${id}`, payload),
-
   remove: (id) => api.delete(`/assets/${id}`),
 };
 
-/* ================= AGENTS ================= */
-
 export const agents = {
   register: (payload) => api.post("/agents/register", payload),
-
   heartbeats: () => api.get("/agents/heartbeats"),
 };
 
-/* ================= USERS ================= */
-
 export const users = {
   list: () => api.get("/users"),
-
   me: () => api.get("/users/me"),
 };
 
-/* ================= API KEYS ================= */
-
 export const apiKeys = {
   list: () => api.get("/admin/api-keys"),
-
   create: (payload) => api.post("/admin/api-keys", payload),
-
   revoke: (id) => api.delete(`/admin/api-keys/${id}`),
-
   rotate: (id, payload = {}) =>
     api.post(`/admin/api-keys/${id}/rotate`, payload),
+};
+
+export const playbooks = {
+  list: () => api.get("/playbooks"),
+  execute: (payload) => api.post("/playbooks/execute", payload),
 };
 
 export default api;

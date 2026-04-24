@@ -56,6 +56,130 @@ const inferSeverityLevel = (item, metadata) => {
   return "info";
 };
 
+const inferSensorType = ({ source, metadata, eventType }) => {
+  const explicit = clampText(
+    metadata?.sensorType ||
+      metadata?.sourceType ||
+      metadata?.agentType
+  ).toLowerCase();
+
+  if (explicit) {
+    if (["snort", "suricata", "nids", "network"].includes(explicit)) return "nids";
+    if (["host", "hids", "endpoint"].includes(explicit)) return "hids";
+    if (["hybrid"].includes(explicit)) return "hybrid";
+  }
+
+  const normalizedSource = clampText(source).toLowerCase();
+  const normalizedEventType = clampText(eventType).toLowerCase();
+
+  if (["snort", "suricata"].includes(normalizedSource) || normalizedEventType.startsWith("snort.")) {
+    return "nids";
+  }
+
+  if (
+    ["host", "agent"].includes(normalizedSource) ||
+    normalizedEventType.startsWith("auth.") ||
+    normalizedEventType.startsWith("process.") ||
+    normalizedEventType.startsWith("file.") ||
+    normalizedEventType.startsWith("service.") ||
+    normalizedEventType.startsWith("startup.") ||
+    normalizedEventType.startsWith("privilege.")
+  ) {
+    return "hids";
+  }
+
+  if (normalizedSource.includes("ids")) {
+    return "hybrid";
+  }
+
+  return "generic";
+};
+
+const normalizeSeverityLabel = (value, metadata = {}) => {
+  const explicit = clampText(value || metadata?.severity || metadata?.host?.severity).toLowerCase();
+
+  if (["critical", "high", "medium", "low", "info"].includes(explicit)) {
+    return explicit;
+  }
+
+  const snortPriority = toSafeNumber(metadata?.snort?.priority);
+  if (snortPriority !== undefined) {
+    if (snortPriority <= 1) return "critical";
+    if (snortPriority === 2) return "high";
+    if (snortPriority === 3) return "medium";
+    return "low";
+  }
+
+  const requestRate = toSafeNumber(metadata?.requestRate || metadata?.network?.requestRate);
+  const failedAttempts = toSafeNumber(metadata?.failedAttempts || metadata?.host?.failedAttempts);
+
+  if ((requestRate || 0) >= 200 || (failedAttempts || 0) >= 10) return "high";
+  return "info";
+};
+
+const extractProtocol = (item, metadata) =>
+  clampText(
+    metadata?.protocol ||
+      metadata?.appProtocol ||
+      metadata?.snort?.protocol ||
+      metadata?.network?.protocol ||
+      item.protocol
+  );
+
+const extractSrcIp = (item, metadata, context) =>
+  clampText(
+    item.ip ||
+      item.srcIp ||
+      item.sourceIp ||
+      metadata?.snort?.srcIp ||
+      metadata?.network?.sourceIp ||
+      metadata?.host?.sourceIp ||
+      metadata?.sourceIp ||
+      context.ip
+  );
+
+const extractDestIp = (item, metadata) =>
+  clampText(
+    item.destIp ||
+      item.destinationIp ||
+      metadata?.snort?.destIp ||
+      metadata?.network?.destinationIp ||
+      metadata?.destinationIp
+  );
+
+const extractPort = (item, metadata) =>
+  toSafeNumber(
+    item.port ??
+      item.destPort ??
+      item.destinationPort ??
+      metadata?.destinationPort ??
+      metadata?.port ??
+      metadata?.network?.destinationPort ??
+      metadata?.network?.port ??
+      metadata?.snort?.destPort
+  );
+
+const extractAssetIdentity = (item, metadata, context) =>
+  clampText(
+    context.assetIdentity ||
+      context.asset_id ||
+      context.assetId ||
+      metadata?.assetId ||
+      metadata?.asset_id ||
+      metadata?.normalized?.assetId ||
+      item.assetId ||
+      item.asset_id
+  );
+
+const extractUserName = (item, metadata) =>
+  clampText(
+    item.userName ||
+      metadata?.host?.userName ||
+      metadata?.userName ||
+      metadata?.username ||
+      metadata?.user
+  );
+
 const buildEventFingerprint = (normalizedLog) =>
   sha256(
     JSON.stringify({
@@ -105,25 +229,22 @@ const normalizeSecurityEvent = (item, context = {}) => {
   const timestamp = normalizeTimestamp(item.timestamp);
   const source = clampText(item.source || context.defaultSource || "agent");
   const eventType = clampText(item.eventType || metadata.eventType || "event");
-  const sourceType = clampText(
-    metadata.sourceType ||
-      metadata.agentType ||
-      context.sourceType ||
-      (source === "snort" ? "nids" : "generic")
-  ).toLowerCase();
+  const sourceType = inferSensorType({ source, metadata, eventType });
   const category = inferEventCategory(eventType, source);
+  const protocol = extractProtocol(item, metadata);
+  const srcIp = extractSrcIp(item, metadata, context);
+  const destIp = extractDestIp(item, metadata);
+  const port = extractPort(item, metadata);
+  const severity = normalizeSeverityLabel(item.level, metadata);
+  const assetId = extractAssetIdentity(item, metadata, context);
+  const userName = extractUserName(item, metadata);
+  const hostname = clampText(metadata?.hostname || metadata?.host?.hostname || metadata?.host || context.hostname);
 
   const normalized = {
     message: clampText(item.message || metadata.message || `${eventType} event`),
     level: inferSeverityLevel(item, metadata),
     source,
-    ip: clampText(
-      item.ip ||
-        metadata?.snort?.srcIp ||
-        metadata?.network?.sourceIp ||
-        metadata?.host?.sourceIp ||
-        context.ip
-    ),
+    ip: srcIp,
     userId: item.userId || undefined,
     endpoint: item.endpoint || metadata.endpoint || undefined,
     method: item.method || metadata.method || undefined,
@@ -148,8 +269,20 @@ const normalizeSecurityEvent = (item, context = {}) => {
         schemaVersion: "2026-04-hybrid-1",
         category,
         sourceType,
-        assetId: context.assetId?.toString?.() || item._asset_id?.toString?.() || null,
+        timestamp: timestamp.toISOString(),
+        source,
+        sensorType: sourceType,
+        srcIp: srcIp || null,
+        destIp: destIp || null,
+        port: port ?? null,
+        protocol: protocol || null,
+        eventType,
+        severity,
+        message: clampText(item.message || metadata.message || `${eventType} event`),
+        assetId: assetId || context.assetId?.toString?.() || item._asset_id?.toString?.() || null,
         organizationId: context.orgId?.toString?.() || item._org_id?.toString?.() || null,
+        userName: userName || null,
+        hostname: hostname || null,
       },
     },
     timestamp,
@@ -172,6 +305,9 @@ const normalizeSecurityEvent = (item, context = {}) => {
   if (normalized.metadata?.network) {
     normalized.metadata.network = {
       ...normalized.metadata.network,
+      protocol: protocol || normalized.metadata.network.protocol || undefined,
+      sourceIp: srcIp || normalized.metadata.network.sourceIp || undefined,
+      destinationIp: destIp || normalized.metadata.network.destinationIp || undefined,
       destinationPort: toSafeNumber(normalized.metadata.network.destinationPort),
       sourcePort: toSafeNumber(normalized.metadata.network.sourcePort),
       packets: toSafeNumber(normalized.metadata.network.packets),
@@ -183,6 +319,8 @@ const normalizeSecurityEvent = (item, context = {}) => {
   if (normalized.metadata?.host) {
     normalized.metadata.host = {
       ...normalized.metadata.host,
+      userName: userName || normalized.metadata.host.userName || undefined,
+      hostname: hostname || normalized.metadata.host.hostname || undefined,
       pid: toSafeNumber(normalized.metadata.host.pid),
       parentPid: toSafeNumber(normalized.metadata.host.parentPid),
       loginSuccess:
@@ -195,6 +333,16 @@ const normalizeSecurityEvent = (item, context = {}) => {
           : Boolean(normalized.metadata.host.elevated),
     };
   }
+
+  normalized.metadata.sensorType = normalized.metadata.sensorType || sourceType;
+  normalized.metadata.protocol = protocol || normalized.metadata.protocol || undefined;
+  normalized.metadata.sourceIp = srcIp || normalized.metadata.sourceIp || undefined;
+  normalized.metadata.destinationIp = destIp || normalized.metadata.destinationIp || undefined;
+  normalized.metadata.destinationPort = port ?? normalized.metadata.destinationPort;
+  normalized.metadata.port = port ?? normalized.metadata.port;
+  normalized.metadata.userName = userName || normalized.metadata.userName || undefined;
+  normalized.metadata.hostname = hostname || normalized.metadata.hostname || undefined;
+  normalized.metadata.severity = severity || normalized.metadata.severity || undefined;
 
   normalized.eventId = String(item.eventId || buildEventFingerprint(normalized));
   return normalized;

@@ -1,7 +1,6 @@
 const { parse } = require("csv-parse/sync");
 
 const Log = require("../models/Log");
-const { evaluateLog } = require("../services/detector.service");
 const { analyzeLogs } = require("../services/detection.service");
 const { publishEvent } = require("../services/event-stream.service");
 const { normalizeSecurityEvent, toSafeNumber } = require("../services/normalization.service");
@@ -139,10 +138,6 @@ const emitLogsCreated = ({ orgId, logs, source, duplicateCount = 0, mode = "live
 };
 
 const runDetections = async (logs) => {
-  for (const log of logs) {
-    await evaluateLog(log);
-  }
-
   return analyzeLogs(logs);
 };
 
@@ -373,6 +368,8 @@ const ingestLogs = async (req, res) => {
         normalizeLogEntry(item, {
           orgId: req.orgId,
           assetId: req.assetId,
+          assetIdentity: req.asset?.asset_id,
+          hostname: req.asset?.hostname,
           ip: req.ip,
           defaultSource: item?.source || "agent",
         })
@@ -431,6 +428,8 @@ const uploadLogs = async (req, res) => {
       .map((item) =>
         normalizeLogEntry(item, {
           orgId: req.orgId,
+          assetIdentity: req.asset?.asset_id,
+          hostname: req.asset?.hostname,
           ip: req.ip,
           defaultSource: "upload",
         })

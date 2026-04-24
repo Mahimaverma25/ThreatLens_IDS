@@ -51,6 +51,11 @@ const AlertSchema = new mongoose.Schema({
     max: 100,
     default: 50
   },
+  recommendedAction: {
+    type: String,
+    trim: true,
+    default: ""
+  },
   analystNotes: [
     {
       note: { type: String, trim: true },
@@ -74,5 +79,6 @@ AlertSchema.index({ _org_id: 1, timestamp: -1 });
 AlertSchema.index({ _org_id: 1, status: 1, severity: -1 });
 AlertSchema.index({ _org_id: 1, _incident_id: 1 });
 AlertSchema.index({ _org_id: 1, ip: 1 });
+AlertSchema.index({ _org_id: 1, type: 1, ip: 1, timestamp: -1 });
 
 module.exports = mongoose.model("Alert", AlertSchema);

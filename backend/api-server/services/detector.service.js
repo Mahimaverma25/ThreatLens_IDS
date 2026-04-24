@@ -1,4 +1,6 @@
 const Log = require("../models/Log");
+const Alert = require("../models/Alerts");
+const Asset = require("../models/Asset");
 const config = require("../config/env");
 const { upsertCorrelatedAlert } = require("./alert.service");
 
@@ -64,6 +66,65 @@ const getSensorType = (log) =>
     .trim()
     .toLowerCase();
 
+const severityWeightMap = {
+  Critical: 55,
+  High: 38,
+  Medium: 22,
+  Low: 10,
+};
+
+const assetCriticalityWeightMap = {
+  critical: 20,
+  high: 15,
+  medium: 10,
+  low: 5,
+};
+
+const normalizeConfidence = (value, severity = "Medium") => {
+  const candidate = Number(value);
+  if (Number.isFinite(candidate)) {
+    return Math.max(0, Math.min(1, candidate));
+  }
+
+  return severityProfiles[severity]?.confidence ?? severityProfiles.Medium.confidence;
+};
+
+const clampRiskScore = (value) => {
+  const score = Math.round(Number(value) || 0);
+  return Math.max(0, Math.min(100, score));
+};
+
+const getRecommendedAction = (attackType) => {
+  const normalized = String(attackType || "").toLowerCase();
+
+  if (normalized.includes("ddos") || normalized.includes("flood")) {
+    return "Rate-limit or block the offending source, verify upstream filtering, and inspect affected services.";
+  }
+  if (normalized.includes("port scan")) {
+    return "Block or monitor the scanning source, review exposed services, and validate firewall posture.";
+  }
+  if (normalized.includes("ssh brute") || normalized.includes("web brute")) {
+    return "Lock or protect the targeted account/service, enforce MFA, and block the attacking source.";
+  }
+  if (normalized.includes("dns")) {
+    return "Inspect DNS destinations, block suspicious resolvers/domains, and review egress policy.";
+  }
+  if (normalized.includes("exfiltration")) {
+    return "Contain the affected asset, inspect outbound transfers, and preserve evidence for incident response.";
+  }
+  if (normalized.includes("process")) {
+    return "Isolate the endpoint, review the spawned process tree and command line, and collect host forensics.";
+  }
+  if (normalized.includes("file integrity")) {
+    return "Validate the file modification, compare against baseline, and check for persistence or tampering.";
+  }
+  if (normalized.includes("privilege escalation")) {
+    return "Review account activity, isolate the host, and investigate for credential abuse or local exploitation.";
+  }
+
+  return "Review correlated evidence, validate the detection, and escalate according to the incident playbook.";
+};
+
 const buildAlertMetadataFromLog = (log, metadata = {}) => {
   const snort = log?.metadata?.snort || {};
   const protocol =
@@ -106,7 +167,46 @@ const buildAlertMetadataFromLog = (log, metadata = {}) => {
   };
 };
 
-const createDetectionAlert = ({
+const getAssetCriticalityWeight = async (assetId) => {
+  if (!assetId) return assetCriticalityWeightMap.medium;
+
+  const asset = await Asset.findById(assetId).select("asset_criticality");
+  const criticality = String(asset?.asset_criticality || "medium").toLowerCase();
+  return assetCriticalityWeightMap[criticality] || assetCriticalityWeightMap.medium;
+};
+
+const getEventFrequencyWeight = async (log, attackType) => {
+  const sourceIp = log.ip || log?.metadata?.sourceIp || log?.metadata?.snort?.srcIp || null;
+  const relatedAlertCount = await Alert.countDocuments({
+    _org_id: log._org_id,
+    attackType,
+    ...(sourceIp ? { ip: sourceIp } : {}),
+    timestamp: { $gte: telemetryWindowStart() },
+    status: { $ne: "Resolved" },
+  });
+
+  const relatedLogCount = await Log.countDocuments({
+    _org_id: log._org_id,
+    ...(sourceIp ? { ip: sourceIp } : {}),
+    timestamp: { $gte: telemetryWindowStart() },
+  });
+
+  return Math.min(15, relatedAlertCount * 2 + Math.min(relatedLogCount, 7));
+};
+
+const calculateRiskScore = async ({ log, severity, confidence, attackType }) => {
+  const normalizedSeverity = severityProfiles[severity] ? severity : "Medium";
+  const severityWeight = severityWeightMap[normalizedSeverity] || severityWeightMap.Medium;
+  const confidenceWeight = Math.round(normalizeConfidence(confidence, normalizedSeverity) * 25);
+  const eventFrequencyWeight = await getEventFrequencyWeight(log, attackType);
+  const assetCriticalityWeight = await getAssetCriticalityWeight(log?._asset_id);
+
+  return clampRiskScore(
+    severityWeight + confidenceWeight + eventFrequencyWeight + assetCriticalityWeight
+  );
+};
+
+const createDetectionAlert = async ({
   log,
   attackType,
   type = attackType,
@@ -115,22 +215,37 @@ const createDetectionAlert = ({
   risk_score,
   source = "ids-engine",
   metadata = {},
-}) =>
-  upsertCorrelatedAlert({
+}) => {
+  const normalizedSeverity = severityProfiles[severity] ? severity : "Medium";
+  const normalizedConfidence = normalizeConfidence(confidence, normalizedSeverity);
+  const computedRiskScore = await calculateRiskScore({
+    log,
+    severity: normalizedSeverity,
+    confidence: normalizedConfidence,
+    attackType,
+  });
+
+  return upsertCorrelatedAlert({
     orgId: log._org_id,
     assetId: log._asset_id,
     attackType,
     type,
     ip: log.ip || log.metadata?.snort?.srcIp || "unknown",
-    severity,
-    confidence:
-      confidence ?? severityProfiles[severity]?.confidence ?? severityProfiles.Medium.confidence,
-    risk_score:
-      risk_score ?? severityProfiles[severity]?.riskScore ?? severityProfiles.Medium.riskScore,
+    severity: normalizedSeverity,
+    confidence: normalizedConfidence,
+    risk_score: risk_score ?? computedRiskScore,
     relatedLogs: [log._id],
     source,
-    metadata: buildAlertMetadataFromLog(log, metadata),
+    metadata: buildAlertMetadataFromLog(log, {
+      ...metadata,
+      recommendedAction: metadata?.recommendedAction || getRecommendedAction(attackType),
+      riskModel: {
+        severityWeight: severityWeightMap[normalizedSeverity] || severityWeightMap.Medium,
+        confidence: normalizedConfidence,
+      },
+    }),
   });
+};
 
 const evaluateBruteForce = async (log) => {
   if (!isTelemetryLog(log) || log.eventType !== "auth.login" || log.metadata?.success !== false) {
@@ -151,9 +266,15 @@ const evaluateBruteForce = async (log) => {
 
   return createDetectionAlert({
     log,
-    attackType: "Brute Force Login Attempts",
+    attackType: "SSH Brute Force",
     severity: "High",
     source: "rule-engine",
+    metadata: {
+      category: "authentication",
+      family: "ssh-brute-force",
+      destinationPort: getDestinationPort(log),
+      failedAttempts: failures,
+    },
   });
 };
 
@@ -317,7 +438,7 @@ const evaluateDnsTunneling = async (log) => {
 
   return createDetectionAlert({
     log,
-    attackType: "DNS Tunneling / Covert Channel",
+    attackType: "DNS Abuse",
     severity: "High",
     source: "rule-engine",
     metadata: {
@@ -432,7 +553,7 @@ const evaluateSuspiciousProcessCreation = async (log) => {
 
   return createDetectionAlert({
     log,
-    attackType: "Suspicious Process Creation",
+    attackType: "Suspicious Process",
     severity: "High",
     source: "rule-engine",
     metadata: {
@@ -471,7 +592,7 @@ const evaluateSensitiveFileChange = async (log) => {
 
   return createDetectionAlert({
     log,
-    attackType: "Sensitive File Integrity Change",
+    attackType: "File Integrity Change",
     severity: "High",
     source: "rule-engine",
     metadata: {
@@ -576,9 +697,14 @@ const evaluateDosBurst = async (log) => {
 
   return createDetectionAlert({
     log,
-    attackType: "Request Burst / DoS",
+    attackType: "DDoS / Request Flood",
     severity: "Critical",
     source: "rule-engine",
+    metadata: {
+      category: "network",
+      family: "ddos",
+      requestRate: count,
+    },
   });
 };
 
@@ -626,6 +752,11 @@ const evaluatePortScan = async (log) => {
     attackType: "Port Scan Activity",
     severity: "High",
     source: "rule-engine",
+    metadata: {
+      category: "network",
+      family: "port-scan",
+      uniquePorts: uniquePorts.length,
+    },
   });
 };
 
@@ -645,11 +776,44 @@ const evaluateCredentialStuffing = async (log) => {
 
   return createDetectionAlert({
     log,
-    attackType: "Credential Stuffing Attempt",
+    attackType: "Web Brute Force",
     severity: "High",
     confidence: 0.86,
-    risk_score: 79,
     source: "rule-engine",
+    metadata: {
+      category: "authentication",
+      family: "web-brute-force",
+      destinationPort,
+      failedAttempts,
+      requestRate,
+    },
+  });
+};
+
+const evaluateIcmpFlood = async (log) => {
+  if (!isTelemetryLog(log)) {
+    return null;
+  }
+
+  const protocol = getProtocol(log);
+  const packets = Number(log?.metadata?.packets || log?.metadata?.network?.packets || 0);
+  const requestRate = Number(log?.metadata?.requestRate || log?.metadata?.network?.requestRate || 0);
+
+  if (protocol !== "ICMP" || (packets < 500 && requestRate < 120)) {
+    return null;
+  }
+
+  return createDetectionAlert({
+    log,
+    attackType: "ICMP Flood",
+    severity: "Critical",
+    source: "rule-engine",
+    metadata: {
+      category: "network",
+      family: "icmp-flood",
+      packets,
+      requestRate,
+    },
   });
 };
 
@@ -667,10 +831,15 @@ const evaluateDataExfiltration = async (log) => {
 
   return createDetectionAlert({
     log,
-    attackType: "Potential Data Exfiltration",
+    attackType: "Data Exfiltration",
     severity: "Critical",
-    risk_score: 88,
     source: "rule-engine",
+    metadata: {
+      category: "network",
+      family: "data-exfiltration",
+      bytes,
+      flowCount,
+    },
   });
 };
 
@@ -799,6 +968,7 @@ const evaluateLog = async (log) => {
     evaluateBruteForce(log),
     evaluateUnauthorizedAdminAccess(log),
     evaluateDosBurst(log),
+    evaluateIcmpFlood(log),
     evaluateSuspiciousIp(log),
     evaluatePortScan(log),
     evaluateCredentialStuffing(log),

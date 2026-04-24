@@ -13,6 +13,8 @@ const SEVERITY_RANK = {
 };
 
 const normalizeIp = (value) => String(value || "").trim();
+const normalizeUserName = (value) => String(value || "").trim().toLowerCase();
+const normalizeText = (value) => String(value || "").trim();
 
 const incidentSocketPayload = (incident, type, meta = {}) => ({
   type,
@@ -29,6 +31,44 @@ const buildSummary = (alert) => {
   const confidence = Math.round(Number(alert.confidence || 0.5) * 100);
   const risk = Number(alert.risk_score || 50);
   return `${alert.attackType || alert.type} from ${alert.ip || "unknown"} at ${confidence}% confidence and risk ${risk}.`;
+};
+
+const getAttackChainStep = (alert) => {
+  const family = normalizeText(alert?.metadata?.family).toLowerCase();
+  const attackType = normalizeText(alert?.attackType || alert?.type).toLowerCase();
+
+  if (family.includes("port-scan") || attackType.includes("scan")) return "reconnaissance";
+  if (family.includes("ssh-brute-force") || family.includes("authentication") || attackType.includes("brute")) {
+    return "credential-access";
+  }
+  if (family.includes("process") || attackType.includes("process")) return "execution";
+  if (family.includes("data-exfiltration") || attackType.includes("exfiltration")) return "exfiltration";
+  if (family.includes("dns") || attackType.includes("dns")) return "command-and-control";
+  return family || attackType || "general-threat";
+};
+
+const calculateIncidentSeverity = (incident, incomingAlert) => {
+  const chainSteps = new Set([
+    ...(Array.isArray(incident?.metadata?.attackChain) ? incident.metadata.attackChain : []),
+    getAttackChainStep(incomingAlert),
+  ]);
+
+  if (
+    chainSteps.has("reconnaissance") &&
+    chainSteps.has("credential-access") &&
+    chainSteps.has("execution")
+  ) {
+    return "Critical";
+  }
+
+  if (
+    chainSteps.has("credential-access") &&
+    (chainSteps.has("execution") || chainSteps.has("command-and-control") || chainSteps.has("exfiltration"))
+  ) {
+    return "Critical";
+  }
+
+  return mergeSeverity(incident?.severity, incomingAlert?.severity || "Medium");
 };
 
 const mergeSeverity = (current, incoming) =>
@@ -57,13 +97,28 @@ const upsertIncidentFromAlert = async (alertDoc) => {
 
   const attackType = String(alertDoc.attackType || alertDoc.type || "Threat Activity").trim();
   const ip = normalizeIp(alertDoc.ip);
+  const destinationIp = normalizeIp(
+    alertDoc?.metadata?.destinationIp || alertDoc?.metadata?.snort?.destIp
+  );
+  const userName = normalizeUserName(
+    alertDoc?.metadata?.userName || alertDoc?.metadata?.host?.userName
+  );
+  const correlationStart = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
   let incident = await Incident.findOne({
     _org_id: alertDoc._org_id,
-    attackType,
-    source: alertDoc.source || "correlation-engine",
-    sourceIps: ip || undefined,
     status: { $in: [...ACTIVE_INCIDENT_STATUSES] },
+    lastSeen: { $gte: correlationStart },
+    $or: [
+      ...(ip ? [{ sourceIps: ip }] : []),
+      ...(destinationIp ? [{ destinationIps: destinationIp }] : []),
+      ...(userName ? [{ "metadata.userNames": userName }] : []),
+      ...(alertDoc._asset_id ? [{ assetIds: alertDoc._asset_id }] : []),
+      {
+        attackType,
+        source: alertDoc.source || "correlation-engine",
+      },
+    ],
   }).sort({ lastSeen: -1 });
 
   if (!incident) {
@@ -87,13 +142,19 @@ const upsertIncidentFromAlert = async (alertDoc) => {
       lastSeen: alertDoc.timestamp || new Date(),
       metadata: {
         sources: [alertDoc.source || "unknown"],
+        userNames: userName ? [userName] : [],
+        attackChain: [getAttackChainStep(alertDoc)],
       },
     });
 
     emitIncident("incidents:new", incident, "created");
   } else {
-    incident.title = attackType;
-    incident.severity = mergeSeverity(incident.severity, alertDoc.severity || "Medium");
+    incident.title =
+      incident.title && incident.title !== attackType
+        ? `${incident.title} / ${attackType}`
+        : attackType;
+    incident.attackType = incident.attackType || attackType;
+    incident.severity = calculateIncidentSeverity(incident, alertDoc);
     incident.summary = buildSummary(alertDoc);
     incident.sourceIps = appendUnique(incident.sourceIps || [], ip);
     incident.destinationIps = appendUnique(
@@ -113,6 +174,13 @@ const upsertIncidentFromAlert = async (alertDoc) => {
     incident.metadata = {
       ...(incident.metadata || {}),
       sources: appendUnique(incident.metadata?.sources || [], alertDoc.source || "unknown"),
+      userNames: userName
+        ? appendUnique(incident.metadata?.userNames || [], userName)
+        : incident.metadata?.userNames || [],
+      attackChain: appendUnique(
+        incident.metadata?.attackChain || [],
+        getAttackChainStep(alertDoc)
+      ),
     };
     await incident.save();
 

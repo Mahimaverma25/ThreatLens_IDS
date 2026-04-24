@@ -145,6 +145,9 @@ const IncidentSchema = new mongoose.Schema({
 
   sourceIps: [{ type: String, trim: true }],
   destinationIps: [{ type: String, trim: true }],
+  hostnames: [{ type: String, trim: true }],
+  userNames: [{ type: String, trim: true }],
+  attackChain: [{ type: String, trim: true }],
 
   confidence: {
     type: Number,
@@ -273,6 +276,14 @@ IncidentSchema.pre("save", function (next) {
     this.resolved_at = this.resolvedAt;
   }
 
+  if ((!this.userNames || this.userNames.length === 0) && Array.isArray(this.metadata?.userNames)) {
+    this.userNames = this.metadata.userNames;
+  }
+
+  if ((!this.attackChain || this.attackChain.length === 0) && Array.isArray(this.metadata?.attackChain)) {
+    this.attackChain = this.metadata.attackChain;
+  }
+
   next();
 });
 
@@ -280,5 +291,6 @@ IncidentSchema.index({ _org_id: 1, created_at: -1 });
 IncidentSchema.index({ _org_id: 1, status: 1, severity: 1 });
 IncidentSchema.index({ _org_id: 1, owner: 1 });
 IncidentSchema.index({ _org_id: 1, attackType: 1, source: 1, lastSeen: -1 });
+IncidentSchema.index({ _org_id: 1, sourceIps: 1, destinationIps: 1, lastSeen: -1 });
 
 module.exports = mongoose.model("Incident", IncidentSchema);
