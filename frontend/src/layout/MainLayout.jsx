@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { activeNavigationItems, getPageMeta } from "../config/navigation";
+import { flatNavigationItems, getPageMeta } from "../config/navigation";
 import { useAuth } from "../context/AuthContext";
 import useSocket from "../hooks/useSocket";
 import "../styles/layout.css";
@@ -17,16 +17,20 @@ function MainLayout({ children }) {
   const navigate = useNavigate();
   const token = localStorage.getItem("accessToken");
   const dropdownRef = useRef(null);
+
   const role = user?.role || "viewer";
   const pageMeta = getPageMeta(location.pathname);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
 
-  const availableItems = useMemo(
-    () => activeNavigationItems.filter((item) => item.roles.includes(role)),
-    [role]
-  );
+  const availableItems = useMemo(() => {
+    return flatNavigationItems.filter((item) => {
+      if (!item.roles || item.roles.length === 0) return true;
+      return item.roles.includes(role);
+    });
+  }, [role]);
 
   const socketState = useSocket(token, {});
 
@@ -69,11 +73,11 @@ function MainLayout({ children }) {
         }`}
       >
         <div className="soc-sidebar__top">
-          <Link to="/dashboard" className="soc-sidebar__brand">
+          <Link to="/overview" className="soc-sidebar__brand">
             <span className="soc-sidebar__mark">TL</span>
             <div className="soc-sidebar__brand-copy">
               <strong>ThreatLens</strong>
-              <span>IDS Dashboard</span>
+              <span>Hybrid IDS Platform</span>
             </div>
           </Link>
 
@@ -87,7 +91,7 @@ function MainLayout({ children }) {
           </button>
         </div>
 
-        <div className="soc-sidebar__section-label">Active Modules</div>
+        <div className="soc-sidebar__section-label">ThreatLens Modules</div>
 
         <nav className="soc-sidebar__nav" aria-label="Primary navigation">
           {availableItems.map((item) => (
@@ -111,14 +115,14 @@ function MainLayout({ children }) {
         </div>
       </aside>
 
-      {mobileSidebarOpen ? (
+      {mobileSidebarOpen && (
         <button
           type="button"
           className="soc-sidebar__backdrop"
           onClick={() => setMobileSidebarOpen(false)}
           aria-label="Close sidebar"
         />
-      ) : null}
+      )}
 
       <div className={`soc-shell${sidebarCollapsed ? " soc-shell--expanded" : ""}`}>
         <header className="soc-topbar">
@@ -131,6 +135,7 @@ function MainLayout({ children }) {
             >
               Menu
             </button>
+
             <div className="soc-topbar__title-wrap">
               <span className="soc-topbar__eyebrow">{pageMeta.eyebrow}</span>
               <h1>{pageMeta.label}</h1>
@@ -142,25 +147,29 @@ function MainLayout({ children }) {
               <span className="soc-status-badge__dot" />
               <span>
                 {socketState.connectionStatus === "connected"
-                  ? "Live"
+                  ? "Live Monitoring Active"
                   : socketState.connectionStatus === "error"
                     ? "Disconnected"
                     : "Syncing"}
               </span>
             </div>
 
-            {user ? (
+            {user && (
               <div className={`soc-account${accountOpen ? " open" : ""}`}>
                 <button
                   type="button"
                   className="soc-account__button"
                   onClick={() => setAccountOpen((current) => !current)}
                 >
-                  <span className="soc-account__avatar">{String(user.email || "U").charAt(0).toUpperCase()}</span>
+                  <span className="soc-account__avatar">
+                    {String(user.email || "U").charAt(0).toUpperCase()}
+                  </span>
+
                   <span className="soc-account__meta">
                     <strong>{titleCase(role)}</strong>
                     <small>{user.email}</small>
                   </span>
+
                   <span className="soc-account__caret">+</span>
                 </button>
 
@@ -169,12 +178,17 @@ function MainLayout({ children }) {
                     <strong>{user.email}</strong>
                     <span>{titleCase(role)}</span>
                   </div>
-                  <button type="button" className="soc-account__menu-action" onClick={handleLogout}>
+
+                  <button
+                    type="button"
+                    className="soc-account__menu-action"
+                    onClick={handleLogout}
+                  >
                     Logout
                   </button>
                 </div>
               </div>
-            ) : null}
+            )}
           </div>
         </header>
 

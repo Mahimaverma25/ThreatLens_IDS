@@ -277,6 +277,11 @@ export const users = {
   me: () => api.get("/users/me"),
 };
 
+export const settings = {
+  get: () => api.get("/settings"),
+  update: (payload) => api.put("/settings", payload),
+};
+
 export const apiKeys = {
   list: () => api.get("/admin/api-keys"),
   create: (payload) => api.post("/admin/api-keys", payload),

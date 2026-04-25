@@ -42,6 +42,44 @@ const UserSchema = new mongoose.Schema({
     trim: true
   },
 
+  settings: {
+    system: {
+      theme: {
+        type: String,
+        enum: ["dark", "light"],
+        default: "dark"
+      },
+      notifications: {
+        type: Boolean,
+        default: true
+      }
+    },
+    idsConfig: {
+      alertThreshold: {
+        type: Number,
+        default: 70,
+        min: 0,
+        max: 100
+      },
+      autoBlock: {
+        type: Boolean,
+        default: false
+      }
+    },
+    agentApi: {
+      endpoint: {
+        type: String,
+        trim: true,
+        default: ""
+      },
+      apiKey: {
+        type: String,
+        trim: true,
+        default: ""
+      }
+    }
+  },
+
   lastLoginAt: { type: Date },
   lastLoginIp: { type: String, trim: true },
 

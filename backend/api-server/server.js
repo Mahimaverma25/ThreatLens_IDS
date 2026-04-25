@@ -28,6 +28,7 @@ const logsRoutes = require("./routes/logs.routes");
 const playbooksRoutes = require("./routes/playbooks.routes");
 const reportRoutes = require("./routes/report.routes");
 const rulesRoutes = require("./routes/rules.routes");
+const settingsRoutes = require("./routes/settings.routes");
 const userRoutes = require("./routes/user.routes");
 
 const app = express();
@@ -162,6 +163,7 @@ app.use("/api/playbooks", authenticate, orgIsolation, playbooksRoutes);
 app.use("/api/rules", authenticate, orgIsolation, rulesRoutes);
 app.use("/api/assets", authenticate, orgIsolation, assetRoutes);
 app.use("/api/admin/api-keys", authenticate, orgIsolation, apikeyRoutes);
+app.use("/api/settings", authenticate, orgIsolation, settingsRoutes);
 app.use("/api/users", authenticate, orgIsolation, userRoutes);
 
 /* ----------------------------- 404 / Errors -------------------------------- */

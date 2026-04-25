@@ -25,6 +25,18 @@ export const AuthProvider = ({ children }) => {
   });
   const [loading, setLoading] = useState(true);
 
+  const updateUser = (nextUser) => {
+    const normalizedUser = nextUser ? normalizeUserRole(nextUser) : null;
+
+    setUser(normalizedUser);
+
+    if (normalizedUser) {
+      localStorage.setItem("user", JSON.stringify(normalizedUser));
+    } else {
+      localStorage.removeItem("user");
+    }
+  };
+
   /* ================= INIT AUTH ================= */
 
   useEffect(() => {
@@ -40,8 +52,7 @@ export const AuthProvider = ({ children }) => {
       try {
         const meRes = await authApi.me();
         const normalizedUser = normalizeUserRole(meRes.data.user || meRes.data.data);
-        setUser(normalizedUser);
-        localStorage.setItem("user", JSON.stringify(normalizedUser));
+        updateUser(normalizedUser);
       } catch (err) {
         try {
           const refreshRes = await authApi.refresh();
@@ -51,12 +62,11 @@ export const AuthProvider = ({ children }) => {
 
           const meRes = await authApi.me();
           const normalizedUser = normalizeUserRole(meRes.data.user || meRes.data.data);
-          setUser(normalizedUser);
-          localStorage.setItem("user", JSON.stringify(normalizedUser));
+          updateUser(normalizedUser);
         } catch (refreshErr) {
           localStorage.removeItem("accessToken");
           localStorage.removeItem("user");
-          setUser(null);
+          updateUser(null);
         }
       } finally {
         setLoading(false);
@@ -75,8 +85,7 @@ export const AuthProvider = ({ children }) => {
     const user = normalizeUserRole(res.data.user);
 
     localStorage.setItem("accessToken", token);
-    localStorage.setItem("user", JSON.stringify(user));
-    setUser(user);
+    updateUser(user);
 
     return res.data;
   };
@@ -99,7 +108,7 @@ export const AuthProvider = ({ children }) => {
 
     localStorage.removeItem("accessToken");
     localStorage.removeItem("user");
-    setUser(null);
+    updateUser(null);
   };
 
   return (
@@ -110,6 +119,7 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         logout,
+        updateUser,
       }}
     >
       {children}
