@@ -6,6 +6,7 @@ const Alert = require("../models/Alerts");
 const Asset = require("../models/Asset");
 const Log = require("../models/Log");
 const { upsertIncidentFromAlert } = require("./incident.service");
+const { emitDashboardUpdate, emitNewAlert } = require("./socket.service");
 
 const IDS_TIMEOUT_MS = 5000;
 const DEDUPE_WINDOW_MS = 10 * 60 * 1000;
@@ -406,6 +407,16 @@ const createDetectionAlert = async ({
     duplicate.markModified("metadata");
     await duplicate.save();
     await upsertIncidentFromAlert(duplicate);
+    emitNewAlert(duplicate._org_id, duplicate, {
+      type: "updated",
+      source: duplicate.source || source,
+      severity: duplicate.severity || payload.severity,
+    });
+    emitDashboardUpdate(duplicate._org_id, {
+      source: duplicate.source || source,
+      mode: "alert-updated",
+      lastAlert: duplicate,
+    });
     return duplicate;
   }
 
@@ -417,6 +428,16 @@ const createDetectionAlert = async ({
   });
 
   await upsertIncidentFromAlert(alert);
+  emitNewAlert(alert._org_id, alert, {
+    type: "created",
+    source: alert.source || source,
+    severity: alert.severity || payload.severity,
+  });
+  emitDashboardUpdate(alert._org_id, {
+    source: alert.source || source,
+    mode: "alert-created",
+    lastAlert: alert,
+  });
   return alert;
 };
 

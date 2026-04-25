@@ -31,6 +31,41 @@ const getSeverityClass = (severity) => {
   }
 };
 
+const getStatusClass = (status = "") => {
+  switch (String(status).toLowerCase()) {
+    case "resolved":
+      return "status-resolved";
+    case "investigating":
+      return "status-investigating";
+    case "acknowledged":
+      return "status-acknowledged";
+    case "false positive":
+      return "status-false";
+    default:
+      return "status-new";
+  }
+};
+
+const getAlertTitle = (alert) =>
+  alert.type || alert.title || alert.attack_type || alert.event_type || "Unknown Alert";
+
+const getAlertIp = (alert) =>
+  alert.ip ||
+  alert.src_ip ||
+  alert.source_ip ||
+  alert.srcIp ||
+  alert.sourceIp ||
+  alert.remoteAddress ||
+  "-";
+
+const getAlertRisk = (alert) =>
+  alert.risk_score ?? alert.riskScore ?? alert.score ?? 50;
+
+const getAlertConfidence = (alert) => {
+  const value = Number(alert.confidence ?? alert.ml_confidence ?? 0);
+  return value <= 1 ? Math.round(value * 100) : Math.round(value);
+};
+
 const Alerts = () => {
   const [alertList, setAlertList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -56,20 +91,18 @@ const Alerts = () => {
     alertListRef.current = alertList;
   }, [alertList]);
 
-  const hasActiveFilters = useMemo(() => {
-    return Object.values(filters).some((value) => String(value || "").trim() !== "");
-  }, [filters]);
+  const hasActiveFilters = useMemo(
+    () => Object.values(filters).some((value) => String(value || "").trim() !== ""),
+    [filters]
+  );
 
   const fetchAlerts = useCallback(
     async (silent = false) => {
       try {
-        if (silent) setRefreshing(true);
-        else setLoading(true);
-
+        silent ? setRefreshing(true) : setLoading(true);
         setError("");
 
         const response = await alerts.list(LIMIT, page, filters);
-
         const data = response?.data?.data || [];
         const pagination = response?.data?.pagination || {};
 
@@ -115,22 +148,18 @@ const Alerts = () => {
           item._id === incoming._id ? { ...item, ...incoming } : item
         );
 
-        if (exists) {
-          return updated.sort(
-            (a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)
-          );
-        }
-
-        const merged = prepend ? [incoming, ...updated] : [...updated, incoming];
+        const merged = exists
+          ? updated
+          : prepend
+          ? [incoming, ...updated]
+          : [...updated, incoming];
 
         return merged
           .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
           .slice(0, LIMIT);
       });
 
-      if (!exists) {
-        setTotal((current) => current + 1);
-      }
+      if (!exists) setTotal((current) => current + 1);
     },
     [scheduleRefresh]
   );
@@ -156,7 +185,7 @@ const Alerts = () => {
           return;
         }
 
-        mergeIncomingAlert(incoming, false);
+        mergeIncomingAlert(incoming);
       },
 
       "collector:heartbeat": (payload) => {
@@ -197,20 +226,17 @@ const Alerts = () => {
     alertList.forEach((alert) => {
       const severity = normalizeSeverity(alert.severity);
 
-      if (severity === "critical") summary.critical += 1;
-      if (severity === "high") summary.high += 1;
-      if (severity === "medium") summary.medium += 1;
-      if (severity === "low") summary.low += 1;
+      if (summary[severity] !== undefined) summary[severity] += 1;
 
-      if (String(alert.status).toLowerCase() === "investigating") {
+      if (String(alert.status || "New").toLowerCase() === "investigating") {
         summary.investigating += 1;
       }
 
-      confidenceTotal += Number(alert.confidence || 0);
-      riskTotal += Number(alert.risk_score || alert.riskScore || 0);
+      confidenceTotal += getAlertConfidence(alert);
+      riskTotal += Number(getAlertRisk(alert) || 0);
     });
 
-    summary.avgConfidence = Math.round((confidenceTotal / alertList.length) * 100);
+    summary.avgConfidence = Math.round(confidenceTotal / alertList.length);
     summary.avgRisk = Math.round(riskTotal / alertList.length);
 
     return summary;
@@ -220,10 +246,7 @@ const Alerts = () => {
 
   const updateFilter = (key, value) => {
     setPage(1);
-    setFilters((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
   const resetFilters = () => {
@@ -240,7 +263,7 @@ const Alerts = () => {
     if (!alertList.length) return;
 
     const headers = [
-      "Type",
+      "Alert Type",
       "IP Address",
       "Severity",
       "Confidence",
@@ -248,31 +271,28 @@ const Alerts = () => {
       "Status",
       "Source",
       "Timestamp",
+      "Description",
     ];
 
     const rows = alertList.map((alert) => [
-      alert.type || "-",
-      alert.ip || alert.src_ip || "-",
+      getAlertTitle(alert),
+      getAlertIp(alert),
       alert.severity || "-",
-      `${Math.round(Number(alert.confidence || 0) * 100)}%`,
-      alert.risk_score ?? alert.riskScore ?? "-",
-      alert.status || "-",
-      alert.source || "-",
+      `${getAlertConfidence(alert)}%`,
+      getAlertRisk(alert),
+      alert.status || "New",
+      alert.source || "ThreatLens",
       formatTimestamp(alert.timestamp),
+      alert.description || alert.message || "-",
     ]);
 
     const csvContent = [headers, ...rows]
       .map((row) =>
-        row
-          .map((field) => `"${String(field).replace(/"/g, '""')}"`)
-          .join(",")
+        row.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(",")
       )
       .join("\n");
 
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
@@ -286,7 +306,7 @@ const Alerts = () => {
   if (loading) {
     return (
       <MainLayout>
-        <div className="loading">Loading alerts...</div>
+        <div className="loading">Loading live alerts...</div>
       </MainLayout>
     );
   }
@@ -295,16 +315,11 @@ const Alerts = () => {
     <MainLayout>
       <section className="command-header">
         <div>
-          <div className="command-eyebrow">
-            ThreatLens / Detection / Live Alerts
-          </div>
-
+          <div className="command-eyebrow">ThreatLens / Detection Center</div>
           <h1>Live Security Alerts</h1>
-
           <p>
-            Monitor Snort events, rule-based detections, ML anomalies, collector
-            health, and real-time incident signals from one professional alert
-            center.
+            Monitor Snort events, HIDS signals, ML detections, rule-based alerts,
+            and real-time collector health from one clean alert center.
           </p>
         </div>
 
@@ -333,9 +348,9 @@ const Alerts = () => {
 
       <section className="metrics-grid">
         <div className="metric-card">
-          <span>Socket Status</span>
+          <span>Live Channel</span>
           <strong>{socketState.connectionStatus}</strong>
-          <small>{socketState.lastError || "Live channel active"}</small>
+          <small>{socketState.lastError || "Socket listener ready"}</small>
         </div>
 
         <div className="metric-card">
@@ -345,27 +360,19 @@ const Alerts = () => {
         </div>
 
         <div className="metric-card">
-          <span>Last Heartbeat</span>
-          <strong>{formatTimestamp(collectorHeartbeat?.receivedAt)}</strong>
-          <small>{collectorHeartbeat?.hostname || "No collector signal yet"}</small>
-        </div>
-
-        <div className="metric-card">
           <span>Total Alerts</span>
           <strong>{total}</strong>
-          <small>Across current filter result</small>
+          <small>Current filtered result</small>
         </div>
-      </section>
 
-      <section className="metrics-grid">
         <div className="metric-card danger">
           <span>Critical</span>
           <strong>{alertSummary.critical}</strong>
-          <small>Highest priority alerts</small>
+          <small>Immediate action required</small>
         </div>
 
         <div className="metric-card warning">
-          <span>High Severity</span>
+          <span>High</span>
           <strong>{alertSummary.high}</strong>
           <small>Needs quick review</small>
         </div>
@@ -373,19 +380,19 @@ const Alerts = () => {
         <div className="metric-card">
           <span>Investigating</span>
           <strong>{alertSummary.investigating}</strong>
-          <small>Currently under analysis</small>
+          <small>Active analyst workflow</small>
         </div>
 
         <div className="metric-card">
           <span>Avg Confidence</span>
           <strong>{alertSummary.avgConfidence}%</strong>
-          <small>Model/rule confidence</small>
+          <small>Rule / ML certainty</small>
         </div>
 
         <div className="metric-card">
-          <span>Avg Risk Score</span>
+          <span>Avg Risk</span>
           <strong>{alertSummary.avgRisk}</strong>
-          <small>Calculated alert risk</small>
+          <small>Calculated threat score</small>
         </div>
       </section>
 
@@ -393,7 +400,7 @@ const Alerts = () => {
         <input
           className="search-input"
           type="text"
-          placeholder="Search attack type, IP, keyword..."
+          placeholder="Search attack type, IP, source, keyword..."
           value={filters.search}
           onChange={(event) => updateFilter("search", event.target.value)}
         />
@@ -449,7 +456,13 @@ const Alerts = () => {
             </p>
           </div>
 
-          <span className="live-badge">
+          <span
+            className={
+              socketState.connectionStatus === "connected"
+                ? "live-badge"
+                : "live-badge muted"
+            }
+          >
             {socketState.connectionStatus === "connected"
               ? "Live monitoring active"
               : "Live channel inactive"}
@@ -462,7 +475,7 @@ const Alerts = () => {
               <table>
                 <thead>
                   <tr>
-                    <th>Alert Type</th>
+                    <th>Alert</th>
                     <th>IP Address</th>
                     <th>Severity</th>
                     <th>Confidence</th>
@@ -475,18 +488,23 @@ const Alerts = () => {
 
                 <tbody>
                   {alertList.map((alert) => {
-                    const ip = alert.ip || alert.src_ip || alert.source_ip || "-";
-                    const risk = alert.risk_score ?? alert.riskScore ?? 50;
-                    const confidence = Math.round(Number(alert.confidence || 0) * 100);
+                    const title = getAlertTitle(alert);
+                    const ip = getAlertIp(alert);
+                    const risk = getAlertRisk(alert);
+                    const confidence = getAlertConfidence(alert);
+                    const status = alert.status || "New";
 
                     return (
                       <tr key={alert._id}>
                         <td>
                           <Link to={`/alerts/${alert._id}`} className="alert-link">
-                            {alert.type || alert.title || "Unknown Alert"}
+                            {title}
                           </Link>
+
                           <small className="table-subtext">
-                            {alert.description || alert.message || "No description"}
+                            {alert.description ||
+                              alert.message ||
+                              "No additional alert description available."}
                           </small>
                         </td>
 
@@ -500,13 +518,29 @@ const Alerts = () => {
                           </span>
                         </td>
 
-                        <td>{confidence}%</td>
+                        <td>
+                          <div className="confidence-cell">
+                            <span>{confidence}%</span>
+                            <div className="confidence-track">
+                              <div
+                                className="confidence-fill"
+                                style={{
+                                  width: `${Math.min(confidence, 100)}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </td>
 
                         <td>
                           <span className="risk-score">{risk}</span>
                         </td>
 
-                        <td>{alert.status || "New"}</td>
+                        <td>
+                          <span className={`status-pill ${getStatusClass(status)}`}>
+                            {status}
+                          </span>
+                        </td>
 
                         <td>{alert.source || "ThreatLens"}</td>
 
@@ -549,6 +583,15 @@ const Alerts = () => {
               Once Snort, HIDS agent, rule engine, or ML service sends suspicious
               activity, alerts will appear here automatically.
             </p>
+
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => fetchAlerts(true)}
+              disabled={refreshing}
+            >
+              Check Again
+            </button>
           </div>
         )}
       </section>

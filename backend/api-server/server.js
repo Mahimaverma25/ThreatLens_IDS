@@ -164,6 +164,7 @@ app.use("/api/rules", authenticate, orgIsolation, rulesRoutes);
 app.use("/api/assets", authenticate, orgIsolation, assetRoutes);
 app.use("/api/admin/api-keys", authenticate, orgIsolation, apikeyRoutes);
 app.use("/api/settings", authenticate, orgIsolation, settingsRoutes);
+app.use("/api/setting", authenticate, orgIsolation, settingsRoutes);
 app.use("/api/users", authenticate, orgIsolation, userRoutes);
 
 /* ----------------------------- 404 / Errors -------------------------------- */

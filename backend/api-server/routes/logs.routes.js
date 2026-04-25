@@ -13,9 +13,26 @@ const {
   uploadLogs
 } = require("../controllers/logs.controller");
 
+const SUPPORTED_UPLOAD_EXTENSIONS = [".csv", ".json", ".log", ".txt", ".ndjson"];
+const MAX_UPLOAD_FILE_SIZE = 100 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 }
+  limits: { fileSize: MAX_UPLOAD_FILE_SIZE },
+  fileFilter: (req, file, callback) => {
+    const lowerName = String(file.originalname || "").toLowerCase();
+    const isSupported = SUPPORTED_UPLOAD_EXTENSIONS.some((extension) =>
+      lowerName.endsWith(extension)
+    );
+
+    if (!isSupported) {
+      return callback(
+        new Error("Unsupported file type. Allowed: CSV, JSON, NDJSON, LOG, TXT")
+      );
+    }
+
+    return callback(null, true);
+  }
 });
 
 /**

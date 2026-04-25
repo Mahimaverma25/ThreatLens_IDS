@@ -2,6 +2,7 @@ const { parse } = require("csv-parse/sync");
 
 const Log = require("../models/Log");
 const { analyzeLogs } = require("../services/detection.service");
+const { createDetectionAlert } = require("../services/detection.service");
 const { publishEvent } = require("../services/event-stream.service");
 const { normalizeSecurityEvent, toSafeNumber } = require("../services/normalization.service");
 const {
@@ -14,6 +15,355 @@ const clampInt = (value, fallback, min, max) => {
   const parsed = Number.parseInt(value, 10);
   if (Number.isNaN(parsed)) return fallback;
   return Math.min(Math.max(parsed, min), max);
+};
+
+const DATASET_REQUIRED_HEADERS = [
+  "protocol_type",
+  "src_bytes",
+  "dst_bytes",
+  "count",
+  "serror_rate",
+  "label",
+];
+
+const normalizeHeader = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/^\uFEFF/, "")
+    .toLowerCase();
+
+const csvDatasetHasRequiredHeaders = (headers = []) =>
+  DATASET_REQUIRED_HEADERS.every((header) => headers.includes(header));
+
+const toNumberOrDefault = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toOptionalText = (value, fallback = "") => {
+  const normalized = String(value ?? fallback).trim();
+  return normalized;
+};
+
+const normalizeAttackType = (value = "") => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "Normal";
+
+  const lower = normalized.toLowerCase();
+  if (["normal", "benign", "0"].includes(lower)) return "Normal";
+  if (lower.includes("ddos") || lower.includes("dos")) return "DDoS";
+  if (lower.includes("brute")) return "Brute Force";
+  if (lower.includes("port")) return "Port Scan";
+  return normalized;
+};
+
+const toSeverityLabel = (value = "low") => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "critical") return "Critical";
+  if (normalized === "high") return "High";
+  if (normalized === "medium") return "Medium";
+  return "Low";
+};
+
+const toSeverityLower = (value = "low") => String(value || "low").toLowerCase();
+
+const parseDatasetCsv = (content) => {
+  const rows = parse(content, {
+    bom: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
+  });
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return {
+      detectedHeaders: [],
+      invalidRows: [{ rowNumber: 0, message: "CSV file is empty." }],
+      items: [],
+      isDatasetCsv: false,
+    };
+  }
+
+  const detectedHeaders = (rows[0] || []).map(normalizeHeader);
+  const invalidRows = [];
+  const isDatasetCsv = csvDatasetHasRequiredHeaders(detectedHeaders);
+
+  if (!isDatasetCsv) {
+    const parsedItems = parse(content, {
+      bom: true,
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    });
+
+    return {
+      detectedHeaders,
+      invalidRows: invalidRows.concat(
+        DATASET_REQUIRED_HEADERS.filter((header) => !detectedHeaders.includes(header)).length
+          ? [
+              {
+                rowNumber: 1,
+                message: `Missing required dataset columns: ${DATASET_REQUIRED_HEADERS.filter(
+                  (header) => !detectedHeaders.includes(header)
+                ).join(", ")}`,
+              },
+            ]
+          : []
+      ),
+      items: parsedItems,
+      isDatasetCsv: false,
+    };
+  }
+
+  const items = rows.slice(1).reduce((acc, values, index) => {
+    const rowNumber = index + 2;
+
+    if (!Array.isArray(values) || values.length !== detectedHeaders.length) {
+      invalidRows.push({
+        rowNumber,
+        message: "Column count does not match the header row.",
+      });
+      return acc;
+    }
+
+    const row = detectedHeaders.reduce((result, header, headerIndex) => {
+      result[header] = values[headerIndex];
+      return result;
+    }, {});
+
+    if (!toOptionalText(row.protocol_type)) {
+      invalidRows.push({ rowNumber, message: "protocol_type is required." });
+      return acc;
+    }
+
+    acc.push({
+      ...row,
+      __rowNumber: rowNumber,
+    });
+    return acc;
+  }, []);
+
+  return {
+    detectedHeaders,
+    invalidRows,
+    items,
+    isDatasetCsv: true,
+  };
+};
+
+const transformDatasetRowToLog = (row, req) => {
+  const protocol = toOptionalText(row.protocol_type).toUpperCase();
+  const srcBytes = toNumberOrDefault(row.src_bytes, 0);
+  const dstBytes = toNumberOrDefault(row.dst_bytes, 0);
+  const requestCount = toNumberOrDefault(row.count, 0);
+  const errorRate = toNumberOrDefault(row.serror_rate, 0);
+  const attackType = normalizeAttackType(row.label);
+  const failedAttempts = toNumberOrDefault(
+    row.failed_logins ?? row.failed_attempts ?? row.num_failed_logins,
+    0
+  );
+  const sourceIp = toOptionalText(
+    row.source_ip || row.src_ip || row.srcip || row.src_host || req.ip,
+    req.ip
+  );
+  const destinationIp = toOptionalText(
+    row.destination_ip || row.dst_ip || row.dstip || row.dst_host,
+    ""
+  );
+  const destinationPort = toSafeNumber(
+    row.destination_port ??
+      row.dest_port ??
+      row.dst_port ??
+      row.service_port ??
+      row.port
+  );
+
+  return {
+    message: "Network event detected",
+    source: "upload",
+    eventType: "network.upload",
+    protocol,
+    ip: sourceIp,
+    destinationIp,
+    destinationPort,
+    metadata: {
+      protocol,
+      sourceIp,
+      destinationIp,
+      destinationPort,
+      srcBytes,
+      dstBytes,
+      bytes: srcBytes + dstBytes,
+      requestCount,
+      requestRate: requestCount,
+      flowCount: requestCount,
+      errorRate,
+      failedAttempts,
+      attackType,
+      attackLabel: toOptionalText(row.label),
+      originalRow: row,
+    },
+    timestamp: new Date(),
+  };
+};
+
+const buildPredictionFromStoredLog = ({ log, idsResult, fallbackPrediction }) => {
+  const mlAnalysis = idsResult?.analysis || null;
+  const metadata = log?.metadata || {};
+  const idsMetadata = metadata.idsEngine || {};
+
+  const predictedAttackType =
+    fallbackPrediction?.attackType ||
+    metadata.attackType ||
+    mlAnalysis?.submodels?.random_forest?.predicted_class ||
+    idsMetadata?.predictedClass ||
+    (mlAnalysis?.is_anomaly ? "ML Behavioral Anomaly" : "Normal");
+
+  const severity =
+    fallbackPrediction?.severity ||
+    mlAnalysis?.severity ||
+    idsMetadata?.severity ||
+    (predictedAttackType === "Normal" ? "Low" : "Medium");
+
+  return {
+    id: log._id?.toString?.() || log.eventId,
+    message: fallbackPrediction?.message || log.message || "Network event detected",
+    protocol:
+      metadata.protocol ||
+      metadata.normalized?.protocol ||
+      log.protocol ||
+      "-",
+    severity: toSeverityLower(severity),
+    attackType: predictedAttackType,
+    sourceIp:
+      metadata.sourceIp ||
+      metadata.normalized?.srcIp ||
+      log.ip ||
+      "-",
+    timestamp: log.timestamp,
+    confidence:
+      mlAnalysis?.confidence ??
+      idsMetadata?.confidence ??
+      null,
+  };
+};
+
+const deriveFallbackPrediction = async (log) => {
+  const errorRate = toNumberOrDefault(log?.metadata?.errorRate, 0);
+  const failedAttempts = toNumberOrDefault(log?.metadata?.failedAttempts, 0);
+  const requestCount = toNumberOrDefault(log?.metadata?.requestCount, 0);
+
+  if (errorRate > 0.9) {
+    await createDetectionAlert({
+      log,
+      type: "DDoS / DoS",
+      attackType: "DDoS",
+      severity: "Critical",
+      source: "rule-engine",
+      metadata: {
+        family: "csv-ddos",
+        errorRate,
+        requestCount,
+      },
+    });
+
+    return {
+      attackType: "DDoS",
+      severity: "high",
+      message: "Potential DDoS behavior detected from CSV telemetry",
+    };
+  }
+
+  if (failedAttempts > 3) {
+    await createDetectionAlert({
+      log,
+      type: "Brute Force",
+      attackType: "Brute Force",
+      severity: "High",
+      source: "rule-engine",
+      metadata: {
+        family: "csv-brute-force",
+        failedAttempts,
+      },
+    });
+
+    return {
+      attackType: "Brute Force",
+      severity: "high",
+      message: "Brute force pattern detected from CSV telemetry",
+    };
+  }
+
+  if (requestCount > 20) {
+    await createDetectionAlert({
+      log,
+      type: "Port Scan",
+      attackType: "Port Scan",
+      severity: "Medium",
+      source: "rule-engine",
+      metadata: {
+        family: "csv-port-scan",
+        requestCount,
+      },
+    });
+
+    return {
+      attackType: "Port Scan",
+      severity: "medium",
+      message: "Port scanning behavior detected from CSV telemetry",
+    };
+  }
+
+  return {
+    attackType: log?.metadata?.attackType || "Normal",
+    severity: "low",
+    message: log?.message || "Network event detected",
+  };
+};
+
+const parseJsonLine = (line) => {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+};
+
+const parsePlainTextLogs = (content = "") =>
+  content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => parseJsonLine(line) || { message: line, source: "upload" });
+
+const parseUploadedItems = (file, content) => {
+  const fileName = String(file?.originalname || "").toLowerCase();
+  const mimeType = String(file?.mimetype || "").toLowerCase();
+
+  if (mimeType.includes("json") || fileName.endsWith(".json")) {
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  }
+
+  if (fileName.endsWith(".ndjson")) {
+    return content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parsed = parseJsonLine(line);
+        if (!parsed || typeof parsed !== "object") {
+          throw new Error("Invalid NDJSON");
+        }
+        return parsed;
+      });
+  }
+
+  if (fileName.endsWith(".log") || fileName.endsWith(".txt")) {
+    return parsePlainTextLogs(content);
+  }
+
+  return parse(content, { columns: true, skip_empty_lines: true });
 };
 
 const buildSnortLogMatch = () => ({
@@ -411,30 +761,48 @@ const uploadLogs = async (req, res) => {
 
     const content = req.file.buffer.toString("utf-8");
     let items = [];
+    let detectedHeaders = [];
+    let invalidRows = [];
+    let isDatasetCsv = false;
 
     try {
-      if (req.file.mimetype.includes("json") || req.file.originalname.endsWith(".json")) {
-        const parsed = JSON.parse(content);
-        items = Array.isArray(parsed) ? parsed : [parsed];
+      const lowerName = String(req.file.originalname || "").toLowerCase();
+
+      if (lowerName.endsWith(".csv")) {
+        const parsedCsv = parseDatasetCsv(content);
+        items = parsedCsv.items;
+        detectedHeaders = parsedCsv.detectedHeaders;
+        invalidRows = parsedCsv.invalidRows;
+        isDatasetCsv = parsedCsv.isDatasetCsv;
       } else {
-        items = parse(content, { columns: true, skip_empty_lines: true });
+        items = parseUploadedItems(req.file, content);
       }
     } catch (parseError) {
-      return res.status(400).json({ message: "Invalid file format" });
+      return res.status(400).json({
+        message: "Invalid file format. Supported formats: CSV, JSON, NDJSON, LOG, TXT",
+      });
     }
 
     const normalizedLogs = items
       .filter((item) => item && typeof item === "object")
-      .map((item) =>
-        normalizeLogEntry(item, {
+      .map((item) => {
+        const inputItem = isDatasetCsv ? transformDatasetRowToLog(item, req) : item;
+
+        return normalizeLogEntry(inputItem, {
           orgId: req.orgId,
           assetIdentity: req.asset?.asset_id,
           hostname: req.asset?.hostname,
           ip: req.ip,
           defaultSource: "upload",
-        })
-      )
+        });
+      })
       .filter((entry) => entry.message);
+
+    if (normalizedLogs.length === 0) {
+      return res.status(400).json({
+        message: "No valid log entries were found in the uploaded file",
+      });
+    }
 
     const result = await persistLogs(normalizedLogs, {
       orgId: req.orgId,
@@ -442,17 +810,57 @@ const uploadLogs = async (req, res) => {
       mode: "upload",
     });
 
+    const idsResultsByEventId = new Map(
+      Array.isArray(result.idsAnalysis?.results)
+        ? result.idsAnalysis.results
+            .filter((item) => item?.event_id)
+            .map((item) => [item.event_id, item])
+        : []
+    );
+
+    const predictions = [];
+    const shouldUseFallbackRules =
+      isDatasetCsv &&
+      (!result.idsAnalysis ||
+        result.idsAnalysis.status === "offline" ||
+        result.idsAnalysis.status === "rules-only");
+
+    for (const storedLog of result.stored) {
+      const idsResult = idsResultsByEventId.get(storedLog.eventId || storedLog._id?.toString?.());
+      const fallbackPrediction = shouldUseFallbackRules
+        ? await deriveFallbackPrediction(storedLog)
+        : null;
+
+      predictions.push(
+        buildPredictionFromStoredLog({
+          log: storedLog,
+          idsResult,
+          fallbackPrediction,
+        })
+      );
+    }
+
     return res.status(201).json({
       data: result.stored,
+      predictions,
       meta: {
         insertedCount: result.insertedCount,
         duplicateCount: result.duplicateCount,
         idsAnalysis: result.idsAnalysis.status,
+        detectedHeaders,
+        invalidRows,
+        fileName: req.file.originalname,
+        fileType: req.file.mimetype || "text/plain",
       },
     });
   } catch (error) {
     console.error("uploadLogs error:", error);
-    return res.status(500).json({ message: "Failed to upload logs" });
+    return res.status(500).json({
+      message:
+        error?.message?.includes("Unsupported file type")
+          ? error.message
+          : "Failed to upload logs",
+    });
   }
 };
 

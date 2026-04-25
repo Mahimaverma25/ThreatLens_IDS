@@ -198,25 +198,13 @@ export const logs = {
 };
 
 export const uploads = {
-  uploadCsv: async (file) => {
+  uploadCsv: (file) => {
     const formData = new FormData();
     formData.append("file", file);
-
-    try {
-      return await api.post("/upload/csv", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-        timeout: 45000,
-      });
-    } catch (error) {
-      if (error?.response?.status !== 404) {
-        throw error;
-      }
-
-      return api.post("/logs/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-        timeout: 45000,
-      });
-    }
+    return api.post("/logs/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 45000,
+    });
   },
 };
 

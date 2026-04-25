@@ -3,22 +3,35 @@ import MainLayout from "../layout/MainLayout";
 import { uploads } from "../services/api";
 
 const SAMPLE_CSV = [
-  "message,source,eventType,protocol,sourceIp,destinationIp,destinationPort,severity,timestamp",
-  '"Suspicious outbound connection","upload","network.alert","TCP","192.168.1.12","10.10.20.7",443,"high","2026-04-24T12:15:00.000Z"',
-  '"Repeated authentication failure","upload","auth.failure","SSH","192.168.1.99","10.10.20.21",22,"medium","2026-04-24T12:18:00.000Z"',
+  "protocol_type,src_bytes,dst_bytes,count,serror_rate,label,source_ip,destination_ip,failed_logins",
+  "tcp,491,1200,28,0.96,neptune,192.168.1.12,10.10.20.7,0",
+  "tcp,120,84,8,0.10,normal,192.168.1.99,10.10.20.21,0",
+  "tcp,64,32,6,0.35,guess_passwd,192.168.1.44,10.10.20.45,5",
 ].join("\n");
 
 const EXPECTED_HEADERS = [
-  "message",
-  "source",
-  "eventType",
-  "protocol",
-  "sourceIp",
-  "destinationIp",
-  "destinationPort",
-  "severity",
-  "timestamp",
+  "protocol_type",
+  "src_bytes",
+  "dst_bytes",
+  "count",
+  "serror_rate",
+  "label",
 ];
+
+const OPTIONAL_HEADERS = [
+  "source_ip",
+  "destination_ip",
+  "failed_logins",
+  "destination_port",
+];
+
+const SUPPORTED_UPLOAD_EXTENSIONS = [".csv", ".json", ".ndjson", ".log", ".txt"];
+const MAX_UPLOAD_FILE_SIZE = 100 * 1024 * 1024;
+
+const isSupportedUploadFile = (fileName = "") =>
+  SUPPORTED_UPLOAD_EXTENSIONS.some((extension) =>
+    String(fileName).toLowerCase().endsWith(extension)
+  );
 
 const splitCsvLine = (line) => {
   const values = [];
@@ -53,6 +66,12 @@ const splitCsvLine = (line) => {
   return values;
 };
 
+const normalizeHeader = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/^\uFEFF/, "")
+    .toLowerCase();
+
 const readCsvValidation = async (file) => {
   const content = await file.text();
   const lines = content
@@ -68,7 +87,7 @@ const readCsvValidation = async (file) => {
     };
   }
 
-  const detectedHeaders = splitCsvLine(lines[0]);
+  const detectedHeaders = splitCsvLine(lines[0]).map(normalizeHeader);
   const invalidRows = [];
   let validRows = 0;
 
@@ -100,10 +119,18 @@ const readCsvValidation = async (file) => {
       return acc;
     }, {});
 
-    if (!String(row.message || "").trim()) {
+    if (!String(row.protocol_type || "").trim()) {
       invalidRows.push({
         rowNumber,
-        message: "Message is required.",
+        message: "protocol_type is required.",
+      });
+      return;
+    }
+
+    if (!String(row.label || "").trim()) {
+      invalidRows.push({
+        rowNumber,
+        message: "label is required.",
       });
       return;
     }
@@ -115,10 +142,15 @@ const readCsvValidation = async (file) => {
 };
 
 const resolveUploadedRows = (payload) => {
-  if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.predictions)) return payload.predictions;
+  if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.results)) return payload.results;
   if (Array.isArray(payload?.rows)) return payload.rows;
+  return [];
+};
+
+const resolveDetectedHeaders = (payload) => {
+  if (Array.isArray(payload?.meta?.detectedHeaders)) return payload.meta.detectedHeaders;
   return [];
 };
 
@@ -149,18 +181,23 @@ const Upload = () => {
 
   const predictionRows = useMemo(() => resolveUploadedRows(result), [result]);
   const uploadErrors = useMemo(() => resolveInvalidRows(result), [result]);
+  const detectedHeaders = useMemo(() => {
+    if (validation.detectedHeaders.length) return validation.detectedHeaders;
+    return resolveDetectedHeaders(result);
+  }, [result, validation.detectedHeaders]);
   const hasUploadResult = Boolean(result);
+  const isCsvFile = file ? file.name.toLowerCase().endsWith(".csv") : false;
 
   const handleSelectedFile = async (nextFile) => {
     if (!nextFile) return;
 
-    if (!nextFile.name.toLowerCase().endsWith(".csv")) {
-      setError("Only CSV files are supported.");
+    if (!isSupportedUploadFile(nextFile.name)) {
+      setError("Supported files: CSV, JSON, NDJSON, LOG, and TXT.");
       return;
     }
 
-    if (nextFile.size > 30 * 1024 * 1024) {
-      setError("CSV file size must be less than 30 MB.");
+    if (nextFile.size > MAX_UPLOAD_FILE_SIZE) {
+      setError("File size must be less than 100 MB.");
       return;
     }
 
@@ -171,18 +208,26 @@ const Upload = () => {
     setFile(nextFile);
 
     try {
-      const nextValidation = await readCsvValidation(nextFile);
-      setValidation(nextValidation);
+      if (nextFile.name.toLowerCase().endsWith(".csv")) {
+        const nextValidation = await readCsvValidation(nextFile);
+        setValidation(nextValidation);
+      } else {
+        setValidation({
+          validRows: 0,
+          invalidRows: [],
+          detectedHeaders: [],
+        });
+      }
     } catch (err) {
-      console.error("CSV validation error:", err);
+      console.error("Upload validation error:", err);
       setValidation({ validRows: 0, invalidRows: [], detectedHeaders: [] });
-      setError("The CSV file could not be read.");
+      setError("The selected file could not be read.");
     }
   };
 
   const handleUpload = async () => {
     if (!file) {
-      setError("Please select a CSV file first.");
+      setError("Please select a file first.");
       return;
     }
 
@@ -195,7 +240,9 @@ const Upload = () => {
 
       const timerOne = setTimeout(() => {
         setProgress(55);
-        setProcessingText("Validating CSV traffic rows...");
+        setProcessingText(
+          isCsvFile ? "Validating CSV traffic rows..." : "Validating uploaded log entries..."
+        );
       }, 350);
 
       const timerTwo = setTimeout(() => {
@@ -211,6 +258,16 @@ const Upload = () => {
       setProgress(100);
       setProcessingText("Analysis completed successfully.");
       setResult(response?.data ?? null);
+
+      if (isCsvFile && Array.isArray(response?.data?.meta?.detectedHeaders)) {
+        setValidation((current) => ({
+          ...current,
+          detectedHeaders: response.data.meta.detectedHeaders,
+          invalidRows: Array.isArray(response.data.meta.invalidRows)
+            ? response.data.meta.invalidRows
+            : current.invalidRows,
+        }));
+      }
     } catch (err) {
       console.error("CSV upload error:", err);
       setProgress(0);
@@ -720,7 +777,7 @@ const Upload = () => {
             <div className="upload-title">
               <h1>Upload CSV</h1>
               <p>
-                Upload network traffic data, validate CSV rows, and run IDS/ML
+                Upload network traffic data, validate CSV headers, and run IDS/ML
                 prediction analysis.
               </p>
             </div>
@@ -764,14 +821,15 @@ const Upload = () => {
                   }}
                 >
                   <div>
-                    <div className="dropzone-icon">CSV</div>
-                    <h2>{file ? file.name : "Drop your CSV file here"}</h2>
+                    <div className="dropzone-icon">{file ? "FILE" : "LOG"}</div>
+                    <h2>{file ? file.name : "Drop your file here"}</h2>
                     <p>or click to search for and select a file</p>
 
                     <div className="dropzone-badges">
-                      <span>CSV</span>
-                      <span>Maximum 30 MB</span>
-                      <span>{EXPECTED_HEADERS.length} columns</span>
+                      <span>CSV / JSON / NDJSON</span>
+                      <span>LOG / TXT</span>
+                      <span>Maximum 100 MB</span>
+                      <span>{EXPECTED_HEADERS.length} required CSV columns</span>
                     </div>
                   </div>
                 </div>
@@ -779,7 +837,7 @@ const Upload = () => {
                 <input
                   ref={inputRef}
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".csv,.json,.ndjson,.log,.txt,text/csv,application/json,text/plain"
                   className="hidden-input"
                   onChange={(e) => handleSelectedFile(e.target.files?.[0])}
                 />
@@ -855,12 +913,12 @@ const Upload = () => {
                 <div className="requirements-list">
                   <div className="requirement-item">
                     <strong>File Format</strong>
-                    <span>File only CSV with .csv extension.</span>
+                    <span>CSV, JSON, NDJSON, LOG, or TXT files are supported.</span>
                   </div>
 
                   <div className="requirement-item">
                     <strong>File Size</strong>
-                    <span>Maximum 30 MB per upload.</span>
+                    <span>Maximum 100 MB per upload.</span>
                   </div>
 
                   <div className="requirement-item">
@@ -870,7 +928,12 @@ const Upload = () => {
 
                   <div className="requirement-item">
                     <strong>Columns</strong>
-                    <span>{EXPECTED_HEADERS.join(", ")}</span>
+                    <span>CSV format: {EXPECTED_HEADERS.join(", ")}</span>
+                  </div>
+
+                  <div className="requirement-item">
+                    <strong>Optional Fields</strong>
+                    <span>{OPTIONAL_HEADERS.join(", ")}</span>
                   </div>
                 </div>
 
@@ -884,17 +947,17 @@ const Upload = () => {
           <div className="upload-stats">
             <div className="stat-box">
               <span>Detected Headers</span>
-              <strong>{validation.detectedHeaders.length}</strong>
+              <strong>{isCsvFile ? detectedHeaders.length : "-"}</strong>
             </div>
 
             <div className="stat-box">
               <span>Valid Rows</span>
-              <strong>{validation.validRows}</strong>
+              <strong>{isCsvFile ? validation.validRows : "-"}</strong>
             </div>
 
             <div className="stat-box">
               <span>Invalid Rows</span>
-              <strong>{validation.invalidRows.length}</strong>
+              <strong>{isCsvFile ? [...validation.invalidRows, ...uploadErrors].length : uploadErrors.length || "-"}</strong>
             </div>
 
             <div className="stat-box">
@@ -912,10 +975,11 @@ const Upload = () => {
                 <table className="result-table">
                   <thead>
                     <tr>
-                      <th>Message</th>
-                      <th>Source</th>
                       <th>Protocol</th>
                       <th>Severity</th>
+                      <th>Attack Type</th>
+                      <th>Source IP</th>
+                      <th>Message</th>
                       <th>Timestamp</th>
                     </tr>
                   </thead>
@@ -923,10 +987,21 @@ const Upload = () => {
                   <tbody>
                     {predictionRows.slice(0, 12).map((row, index) => (
                       <tr key={row._id || row.id || index}>
-                        <td>{row.message || row.prediction || row.eventType || "Processed row"}</td>
-                        <td>{row.source || row.metadata?.sensorType || "upload"}</td>
                         <td>{row.protocol || row.metadata?.protocol || "-"}</td>
                         <td>{row.severity || row.metadata?.idsEngine?.severity || "-"}</td>
+                        <td>
+                          {row.attackType ||
+                            row.metadata?.attackType ||
+                            row.metadata?.idsEngine?.predictedClass ||
+                            "-"}
+                        </td>
+                        <td>
+                          {row.sourceIp ||
+                            row.metadata?.sourceIp ||
+                            row.ip ||
+                            "-"}
+                        </td>
+                        <td>{row.message || "Network event detected"}</td>
                         <td>
                           {row.timestamp
                             ? new Date(row.timestamp).toLocaleString()
@@ -946,6 +1021,21 @@ const Upload = () => {
               <div className="empty-box">
                 No prediction output yet. Upload a CSV file to see results here.
               </div>
+            )}
+          </section>
+
+          <section className="result-card">
+            <h2>Detected Headers</h2>
+            <p>Headers recognized from the uploaded CSV file.</p>
+
+            {isCsvFile && detectedHeaders.length ? (
+              <div className="dropzone-badges">
+                {detectedHeaders.map((header) => (
+                  <span key={header}>{header}</span>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-box">No CSV headers detected yet.</div>
             )}
           </section>
 

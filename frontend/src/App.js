@@ -152,6 +152,7 @@ function AppRoutes() {
       <Route path="/users" element={<AppPage allowedRoles={["admin"]}><Users /></AppPage>} />
       <Route path="/rules" element={<AppPage allowedRoles={["admin","analyst"]}><Rules /></AppPage>} />
       <Route path="/settings" element={<AppPage allowedRoles={["admin"]}><Settings /></AppPage>} />
+      <Route path="/setting" element={<Navigate to="/settings" replace />} />
       <Route path="/assets" element={<AppPage allowedRoles={["admin","analyst"]}><Assets /></AppPage>} />
 
       {/* FALLBACK */}
