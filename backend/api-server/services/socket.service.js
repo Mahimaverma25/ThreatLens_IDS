@@ -18,6 +18,14 @@ const emitDashboardUpdate = (orgId, payload = {}) => {
   });
 };
 
+const emitReportsUpdate = (orgId, payload = {}) => {
+  emitToOrganization(normalizeOrgId(orgId), "reports:update", {
+    organizationId: normalizeOrgId(orgId),
+    timestamp: new Date().toISOString(),
+    ...payload,
+  });
+};
+
 const emitNewLog = (orgId, log, meta = {}) => {
   if (!log) return;
 
@@ -32,6 +40,13 @@ const emitNewLog = (orgId, log, meta = {}) => {
 
   emitToOrganization(normalizeOrgId(orgId), "logs:new", payload);
   emitToOrganization(normalizeOrgId(orgId), "log:new", payload);
+  emitReportsUpdate(normalizeOrgId(orgId), {
+    source: meta.source || log.source || "unknown",
+    type: "log-created",
+    latestLog: log,
+    insertedCount: meta.insertedCount || 1,
+    duplicateCount: meta.duplicateCount || 0,
+  });
 };
 
 const emitNewAlert = (orgId, alert, meta = {}) => {
@@ -47,6 +62,12 @@ const emitNewAlert = (orgId, alert, meta = {}) => {
 
   emitToOrganization(normalizeOrgId(orgId), "alerts:new", payload);
   emitToOrganization(normalizeOrgId(orgId), "alert:new", payload);
+  emitReportsUpdate(normalizeOrgId(orgId), {
+    source: meta.source || alert.source || "unknown",
+    type: meta.type || "alert-created",
+    latestAlert: alert,
+    severity: meta.severity || alert.severity || "Unknown",
+  });
 };
 
 const emitCollectorHeartbeat = (orgId, heartbeat, meta = {}) => {
@@ -72,6 +93,13 @@ const emitCollectorHeartbeat = (orgId, heartbeat, meta = {}) => {
     timestamp: heartbeat.receivedAt || new Date().toISOString(),
     meta,
   });
+  emitReportsUpdate(normalizeOrgId(orgId), {
+    source: "collector",
+    type: "collector-heartbeat",
+    status: heartbeat.status || "unknown",
+    queueDepth: heartbeat.queueDepth ?? heartbeat.queue_depth ?? 0,
+    agentType: heartbeat.agentType || heartbeat.agent_type || null,
+  });
 };
 
 const emitStreamEvent = (orgId, payload = {}) => {
@@ -93,6 +121,7 @@ module.exports = {
   emitNewLog,
   emitNewAlert,
   emitDashboardUpdate,
+  emitReportsUpdate,
   emitCollectorHeartbeat,
   emitStreamEvent,
 };

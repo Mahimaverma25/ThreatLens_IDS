@@ -398,36 +398,43 @@ const Upload = () => {
 
         .selected-file-card {
           margin-top: 16px;
-          background: rgba(13, 27, 48, 0.92);
+          background:
+            radial-gradient(circle at top right, rgba(255, 155, 47, 0.12), transparent 34%),
+            radial-gradient(circle at bottom left, rgba(93, 223, 255, 0.12), transparent 32%),
+            linear-gradient(135deg, rgba(10, 20, 36, 0.96), rgba(13, 27, 48, 0.94));
           border-radius: 14px;
           padding: 16px 18px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 16px;
-          border: 1px solid rgba(148, 163, 184, 0.14);
-          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+          border: 1px solid rgba(93, 223, 255, 0.18);
+          box-shadow: 0 12px 28px rgba(2, 6, 18, 0.24);
         }
 
         .selected-file-card strong {
           display: block;
-          color: #f3f7ff;
+          color: #f8fbff;
           font-size: 15px;
           margin-bottom: 5px;
         }
 
         .selected-file-card span {
-          color: #9bb0cb;
+          color: #9fb4d2;
           font-size: 13px;
         }
 
         .clear-link {
           border: 0;
           background: transparent;
-          color: #ff8b9b;
+          color: #ffbe78;
           cursor: pointer;
           font-weight: 900;
           white-space: nowrap;
+        }
+
+        .clear-link:hover {
+          color: #ffd166;
         }
 
         .progress-wrap {

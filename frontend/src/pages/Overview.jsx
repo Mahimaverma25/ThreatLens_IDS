@@ -1,177 +1,219 @@
-import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import MainLayout from "../layout/MainLayout";
-import { dashboard } from "../services/api";
 
-const formatTime = (value) => {
-  if (!value) return "No data";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "No data" : date.toLocaleString();
-};
+const modelCards = [
+  {
+    name: "Random Forest",
+    badge: "Best Performer",
+    score: "98.12%",
+    color: "green",
+    description:
+      "Primary ML model for attack classification using multiple decision trees for robust IDS prediction.",
+    metrics: {
+      Accuracy: "98.12%",
+      Precision: "98.17%",
+      "F1 Score": "98.13%",
+      Recall: "98.12%",
+    },
+    note: "Excellent for high-dimensional network data",
+  },
+  {
+    name: "SVM Classifier",
+    badge: "Anomaly Boundary",
+    score: "97.86%",
+    color: "blue",
+    description:
+      "Detects suspicious traffic patterns by separating normal and malicious behavior boundaries.",
+    metrics: {
+      Accuracy: "97.86%",
+      Precision: "97.91%",
+      "F1 Score": "97.88%",
+      Recall: "97.84%",
+    },
+    note: "Useful for anomaly-based detection",
+  },
+  {
+    name: "Decision Tree",
+    badge: "Explainable",
+    score: "98.06%",
+    color: "orange",
+    description:
+      "Provides clear decision paths for security analysts and helps explain why an alert was generated.",
+    metrics: {
+      Accuracy: "98.06%",
+      Precision: "98.12%",
+      "F1 Score": "98.07%",
+      Recall: "98.06%",
+    },
+    note: "Explainable AI for security teams",
+  },
+];
+
+const attackCategories = [
+  { name: "Service Exploits", score: "98.48%", samples: "15,547 samples", icon: "🖥️", color: "green" },
+  { name: "Brute Force Attacks", score: "98.14%", samples: "294 samples", icon: "🔑", color: "cyan" },
+  { name: "DDoS Attacks", score: "98.05%", samples: "608 samples", icon: "🛡️", color: "yellow" },
+  { name: "Botnet Activities", score: "97.82%", samples: "11,098 samples", icon: "🤖", color: "red" },
+  { name: "Port Scanning", score: "97.58%", samples: "2,031 samples", icon: "🔍", color: "blue" },
+  { name: "Privilege Escalation", score: "89.80%", samples: "88 samples", icon: "⬆️", color: "gray" },
+];
+
+const stats = [
+  { value: "98.1%", label: "Overall Accuracy" },
+  { value: "6", label: "Attack Categories" },
+  { value: "29,966", label: "Training Samples" },
+  { value: "37", label: "Network Features" },
+];
+
+const datasetPoints = [
+  "29,966 total training samples",
+  "37 network traffic features",
+  "6 attack categories + Normal traffic",
+  "98.13% F1 Score achieved",
+  "Balanced class distribution",
+  "Production-ready performance",
+];
+
+const techStack = [
+  "Python 3.9+",
+  "Scikit-learn",
+  "Pandas / NumPy",
+  "Flask ML Service",
+  "Random Forest",
+  "SVM",
+  "MongoDB",
+  "React.js",
+];
+
+const features = [
+  "Real-time network monitoring",
+  "CSV dataset attack analysis",
+  "HIDS and NIDS telemetry support",
+  "ML-based attack classification",
+  "Rule-based detection engine",
+  "Live alerts and incident workflow",
+];
 
 const Overview = () => {
-  const [overview, setOverview] = useState(null);
-  const [health, setHealth] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    const fetchOverview = async () => {
-      try {
-        setLoading(true);
-        setError("");
-
-        const [overviewResponse, healthResponse] = await Promise.all([
-          dashboard.overview(),
-          dashboard.health(),
-        ]);
-
-        setOverview(overviewResponse?.data?.data ?? {});
-        setHealth(healthResponse?.data ?? {});
-      } catch (fetchError) {
-        console.error("Overview error:", fetchError);
-        setError(fetchError?.response?.data?.message || "Failed to load overview.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchOverview();
-  }, []);
-
-  const executive = overview?.executive ?? {};
-  const posture = overview?.posture ?? {};
-  const operations = overview?.operations?.liveFeed ?? [];
-  const detectionStatus = useMemo(
-    () => [
-      { label: "Monitored Endpoints", value: executive.monitoredEndpoints ?? 0, link: "/assets" },
-      { label: "Online Endpoints", value: executive.onlineEndpoints ?? 0, link: "/live-monitoring" },
-      { label: "Alerts Last 24h", value: executive.alertsLast24h ?? 0, link: "/alerts" },
-      { label: "Open Incidents", value: executive.openIncidents ?? 0, link: "/incidents" },
-      { label: "Critical Alerts", value: posture.criticalAlerts ?? 0, link: "/alerts" },
-      { label: "Sensor Coverage", value: `${posture.sensorCoveragePercent ?? 0}%`, link: "/model-health" },
-    ],
-    [executive, posture]
-  );
-
-  if (loading) {
-    return (
-      <MainLayout>
-        <div className="loading">Loading overview...</div>
-      </MainLayout>
-    );
-  }
-
   return (
     <MainLayout>
-      <div className="overview-page">
-        <section className="overview-hero">
-          <div>
-            <div className="command-eyebrow">ThreatLens / Overview / Executive Snapshot</div>
-            <h2>Executive Security Posture</h2>
-            <p>
-              A concise operational view of endpoint coverage, live detections, and stack health for
-              daily analyst workflows.
-            </p>
-          </div>
+      <div className="tl-overview-page">
+        <section className="tl-overview-hero">
+          <div className="tl-hero-shield">🛡️</div>
+          <h1>ThreatLens IDS with Machine Learning</h1>
+          <h3>Hybrid Intrusion Detection & Real-Time Security Monitoring</h3>
+          <p>
+            Protect your system and network with a hybrid IDS platform using Random Forest,
+            SVM, rule-based detection, live telemetry, and real-time cyber threat monitoring.
+          </p>
 
-          <div className="overview-hero__badges">
-            <span className="live-badge">Collector {health?.collector?.status || "unknown"}</span>
-            <span className="live-badge">Heartbeat {formatTime(health?.collector?.lastHeartbeatAt)}</span>
+          <div className="tl-hero-actions">
+            <Link to="/dashboard" className="tl-primary-btn">
+              Go to Dashboard
+            </Link>
+            <Link to="/live-monitoring" className="tl-secondary-btn">
+              Start Live Monitoring
+            </Link>
           </div>
         </section>
 
-        {error && <div className="error-message">{error}</div>}
+        <section className="tl-section-heading">
+          <h2>Ensemble Machine Learning Model</h2>
+          <p>Production-ready algorithms for network intrusion detection</p>
+          <span>Ensemble Model: Random Forest + SVM + Decision Tree</span>
+        </section>
 
-        <section className="metrics-grid overview-metrics-grid">
-          {detectionStatus.map((item) => (
-            <Link key={item.label} to={item.link} className="overview-card-link">
-              <div className="metric-card metric-card--subtle">
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
+        <section className="tl-model-grid">
+          {modelCards.map((model) => (
+            <article key={model.name} className={`tl-model-card tl-${model.color}`}>
+              <div className="tl-score-circle">{model.score}</div>
+              <h3>{model.name}</h3>
+              <span className="tl-model-badge">{model.badge}</span>
+              <p>{model.description}</p>
+
+              <div className="tl-model-metrics">
+                {Object.entries(model.metrics).map(([key, value]) => (
+                  <div key={key}>
+                    <strong>{key}</strong>
+                    <span>{value}</span>
+                  </div>
+                ))}
               </div>
-            </Link>
+
+              <small>{model.note}</small>
+            </article>
           ))}
         </section>
 
-        <section className="dashboard-grid dashboard-grid--premium overview-grid">
-          <div className="dashboard-panel panel-span-2">
-            <div className="panel-header">
-              <h3>Platform Status</h3>
-              <span>Current health across the monitoring stack</span>
-            </div>
-            <div className="details-grid">
-              <div>
-                <strong>Database</strong>
-                <div>{health?.database || "unknown"}</div>
-              </div>
-              <div>
-                <strong>NIDS</strong>
-                <div>{health?.snort?.status || "unknown"}</div>
-              </div>
-              <div>
-                <strong>HIDS</strong>
-                <div>{health?.host?.status || "unknown"}</div>
-              </div>
-              <div>
-                <strong>IDS Engine</strong>
-                <div>{health?.idsEngine?.status || "unknown"}</div>
-              </div>
-              <div>
-                <strong>Collector</strong>
-                <div>{health?.collector?.status || "unknown"}</div>
-              </div>
-              <div>
-                <strong>Last Heartbeat</strong>
-                <div>{formatTime(health?.collector?.lastHeartbeatAt)}</div>
-              </div>
-            </div>
+        <section className="tl-attack-panel">
+          <div className="tl-panel-title">
+            <h2>Targeted Attack Categories Performance</h2>
+            <p>F1-score performance across different cyber attack types</p>
           </div>
 
-          <div className="dashboard-panel">
-            <div className="panel-header">
-              <h3>Quick Access</h3>
-              <span>Common operator workflows</span>
-            </div>
-            <div className="panel-list">
-              <Link className="list-row list-row--pill" to="/upload">
-                <span>Upload CSV evidence</span>
-                <strong>Open</strong>
-              </Link>
-              <Link className="list-row list-row--pill" to="/live-monitoring">
-                <span>Live Monitoring</span>
-                <strong>Watch</strong>
-              </Link>
-              <Link className="list-row list-row--pill" to="/blocked-ips">
-                <span>Blocked IP review</span>
-                <strong>Inspect</strong>
-              </Link>
-            </div>
+          <div className="tl-attack-grid">
+            {attackCategories.map((attack) => (
+              <div key={attack.name} className={`tl-attack-card tl-border-${attack.color}`}>
+                <div className="tl-attack-icon">{attack.icon}</div>
+                <h3>{attack.name}</h3>
+                <strong>{attack.score}</strong>
+                <span>{attack.samples}</span>
+              </div>
+            ))}
           </div>
 
-          <div className="dashboard-panel panel-span-3">
-            <div className="panel-header">
-              <h3>Recent Operations Feed</h3>
-              <span>Latest analyst-visible events</span>
-            </div>
-            <div className="panel-list">
-              {(operations.length ? operations : []).slice(0, 6).map((item, index) => (
-                <div key={item.id || index} className="list-row list-row-stack">
-                  <div className="list-row__top">
-                    <strong>{item.title || item.label || "Telemetry Event"}</strong>
-                    <span>{formatTime(item.timestamp)}</span>
-                  </div>
-                  <div className="list-meta">{item.summary || item.meta || item.type || "Activity detected"}</div>
-                </div>
+          <div className="tl-stats-grid">
+            {stats.map((item) => (
+              <div key={item.label} className="tl-stat-card">
+                <strong>{item.value}</strong>
+                <span>{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="tl-info-grid">
+          <div className="tl-info-card tl-dataset-card">
+            <h2>Training Dataset</h2>
+            <p>
+              ThreatLens uses structured network and host telemetry for accurate intrusion
+              detection, classification, and alert generation.
+            </p>
+
+            <ul>
+              {datasetPoints.map((point) => (
+                <li key={point}>{point}</li>
               ))}
-              {!operations.length && (
-                <div className="empty-state">
-                  <h3>No live operations yet</h3>
-                  <p>Incoming dashboard activity will appear here as telemetry arrives.</p>
-                </div>
-              )}
-            </div>
+            </ul>
           </div>
+
+          <div className="tl-info-card tl-tech-card">
+            <h2>Technology Stack</h2>
+            <p>
+              Developed with modern full-stack and machine learning technologies for
+              scalability, detection accuracy, and real-time visibility.
+            </p>
+
+            <ul>
+              {techStack.map((tech) => (
+                <li key={tech}>{tech}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="tl-section-heading">
+          <h2>Key Features and Capabilities</h2>
+          <p>ThreatLens combines cybersecurity monitoring, ML prediction, and analyst workflow.</p>
+        </section>
+
+        <section className="tl-feature-grid">
+          {features.map((feature) => (
+            <div key={feature} className="tl-feature-card">
+              <span>✓</span>
+              <strong>{feature}</strong>
+            </div>
+          ))}
         </section>
       </div>
     </MainLayout>
