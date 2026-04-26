@@ -1,7 +1,11 @@
 import axios from "axios";
+import {
+  getActiveApiBaseUrl,
+  getNextApiBaseUrl,
+  setActiveApiBaseUrl,
+} from "./connection";
 
-const API_BASE_URL =
-  process.env.REACT_APP_API_URL || "https://threatlens-api-vav3.onrender.com/api";
+const API_BASE_URL = getActiveApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -32,6 +36,8 @@ api.interceptors.request.use(
   (config) => {
     const accessToken = getToken();
 
+    config.baseURL = getActiveApiBaseUrl();
+
     if (accessToken) {
       config.headers.Authorization = `Bearer ${accessToken}`;
     }
@@ -58,6 +64,26 @@ const isAuthRoute = (url = "") =>
   url.includes("/auth/register") ||
   url.includes("/auth/refresh");
 
+const isRouteNotFoundResponse = (error) =>
+  error?.response?.status === 404 &&
+  /route not found/i.test(String(error?.response?.data?.message || ""));
+
+const shouldTryAlternateApiBase = (error, request = {}) => {
+  if (!request || request._apiBaseRetried) {
+    return false;
+  }
+
+  if (!error.response) {
+    return true;
+  }
+
+  if (isRouteNotFoundResponse(error)) {
+    return true;
+  }
+
+  return false;
+};
+
 api.interceptors.response.use(
   (response) => response,
 
@@ -65,6 +91,17 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     if (!originalRequest) return Promise.reject(error);
+
+     if (shouldTryAlternateApiBase(error, originalRequest)) {
+      const nextApiBaseUrl = getNextApiBaseUrl(originalRequest.baseURL || getActiveApiBaseUrl());
+
+      if (nextApiBaseUrl) {
+        originalRequest._apiBaseRetried = true;
+        originalRequest.baseURL = setActiveApiBaseUrl(nextApiBaseUrl);
+        api.defaults.baseURL = originalRequest.baseURL;
+        return api(originalRequest);
+      }
+    }
 
     if (!error.response) {
       console.error(`Backend not reachable at ${API_BASE_URL}`);

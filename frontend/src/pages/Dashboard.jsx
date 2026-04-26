@@ -382,6 +382,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [liveOpsFeed, setLiveOpsFeed] = useState([]);
   const [liveLogs, setLiveLogs] = useState([]);
 
@@ -399,6 +400,7 @@ const Dashboard = () => {
     try {
       if (!silent) {
         setError("");
+        setRefreshing(true);
       }
 
       const [overviewRes, statsRes, healthRes, alertsRes, logsRes] = await Promise.allSettled([
@@ -610,6 +612,7 @@ const Dashboard = () => {
       }
     } finally {
       fetchingRef.current = false;
+      if (isMountedRef.current) setRefreshing(false);
     }
   }, []);
 
@@ -657,6 +660,36 @@ const Dashboard = () => {
               ...current,
             ].slice(0, 12)
           );
+
+          setStats((current) => ({
+            ...current,
+            mode: "live-monitoring",
+            recentLogs: [deriveLog(newLog), ...safeArray(current.recentLogs)].slice(0, 12),
+            traffic: {
+              ...current.traffic,
+              eventsLast24h: Number(current.traffic.eventsLast24h || 0) + 1,
+              hostEventsLast24h:
+                deriveSensorType(newLog) === "host"
+                  ? Number(current.traffic.hostEventsLast24h || 0) + 1
+                  : current.traffic.hostEventsLast24h,
+              liveSnortEventsLast24h:
+                deriveSensorType(newLog) === "network"
+                  ? Number(current.traffic.liveSnortEventsLast24h || 0) + 1
+                  : current.traffic.liveSnortEventsLast24h,
+            },
+            health: {
+              ...current.health,
+              lastDetectionTime: newLog.timestamp || new Date().toISOString(),
+              hostLastEventAt:
+                deriveSensorType(newLog) === "host"
+                  ? newLog.timestamp || new Date().toISOString()
+                  : current.health.hostLastEventAt,
+              snortLastEventAt:
+                deriveSensorType(newLog) === "network"
+                  ? newLog.timestamp || new Date().toISOString()
+                  : current.health.snortLastEventAt,
+            },
+          }));
         }
         triggerRefresh();
       },
@@ -882,6 +915,57 @@ const Dashboard = () => {
     [liveLogs, stats.recentLogs]
   );
 
+  const exportRowsAsCsv = useCallback((filename, rows) => {
+    const safeRows = safeArray(rows);
+    if (!safeRows.length) return;
+
+    const headers = Object.keys(safeRows[0]);
+    const escapeCell = (value) => {
+      const text = value === null || value === undefined ? "" : String(value);
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const csv = [
+      headers.join(","),
+      ...safeRows.map((row) => headers.map((header) => escapeCell(row[header])).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const exportLiveEvents = useCallback(() => {
+    exportRowsAsCsv(
+      `threatlens-live-events-${new Date().toISOString().slice(0, 10)}.csv`,
+      realtimeRows.map((row) => ({
+        time: row.time,
+        event: row.event,
+        type: row.type,
+        source: row.source,
+        severity: row.severity,
+      }))
+    );
+  }, [exportRowsAsCsv, realtimeRows]);
+
+  const exportEndpointRisk = useCallback(() => {
+    exportRowsAsCsv(
+      `threatlens-endpoint-risk-${new Date().toISOString().slice(0, 10)}.csv`,
+      endpointRows.map((row) => ({
+        hostname: row.hostname,
+        status: row.status,
+        riskScore: row.riskScore,
+        openAlerts: row.openAlerts,
+        lastSeenAt: formatDateTime(row.lastSeenAt),
+      }))
+    );
+  }, [endpointRows, exportRowsAsCsv]);
+
+
   const realtimeColumns = useMemo(
     () => [
       { key: "time", title: "Time" },
@@ -959,8 +1043,11 @@ const Dashboard = () => {
           </div>
 
           <div className="tl-soc-hero__actions">
-            <button type="button" className="tl-soc-refresh" onClick={() => fetchStats()}>
-              Refresh Dashboard
+            <button type="button" className="tl-soc-refresh" onClick={() => fetchStats()} disabled={refreshing}>
+              {refreshing ? "Refreshing..." : "Refresh Dashboard"}
+            </button>
+            <button type="button" className="tl-soc-refresh tl-soc-refresh--ghost" onClick={exportLiveEvents}>
+              Export Live CSV
             </button>
             <div className="tl-soc-hero__signal">
               <span className="tl-soc-hero__signal-label">Socket</span>
@@ -1205,11 +1292,16 @@ const Dashboard = () => {
                 <span className="tl-soc-panel__eyebrow">Endpoint Exposure</span>
                 <h3>Endpoint Risk Table</h3>
               </div>
-              <StatusBadge
-                label={`${formatCompact(stats.overview.executive.onlineEndpoints)} endpoints online`}
-                tone="green"
-                compact
-              />
+              <div className="tl-soc-panel__actions">
+                <StatusBadge
+                  label={`${formatCompact(stats.overview.executive.onlineEndpoints)} endpoints online`}
+                  tone="green"
+                  compact
+                />
+                <button type="button" className="tl-soc-mini-button" onClick={exportEndpointRisk}>
+                  Export Risk CSV
+                </button>
+              </div>
             </div>
             <TableComponent
               columns={endpointColumns}

@@ -3,9 +3,10 @@ const crypto = require("crypto");
 const APIKey = require("../models/APIKey");
 const Asset = require("../models/Asset");
 const config = require("../config/env");
+const { reserveNonce } = require("../services/ingestNonce.service");
+const { appLogger, serializeError } = require("../utils/logger");
 const {
   SIGNATURE_VERSION,
-  buildLegacySignature,
   buildPayloadHash,
   buildSignatureFromSigningKey,
 } = require("../utils/ingestSignature");
@@ -23,14 +24,18 @@ const validateAPIKey = async (req, res, next) => {
     const token = req.headers["x-api-key"];
     const timestamp = req.headers["x-timestamp"];
     const signature = req.headers["x-signature"];
+    const nonce = String(req.headers["x-nonce"] || "").trim();
     const assetIdHeader = req.headers["x-asset-id"];
     const signatureVersion = req.headers["x-signature-version"] || SIGNATURE_VERSION;
-    const legacySecret = req.headers["x-api-secret"];
 
-    if (!token || !timestamp || !signature || !assetIdHeader) {
+    if (!token || !timestamp || !signature || !assetIdHeader || !nonce) {
       return res.status(401).json({
         error: "Missing required auth headers",
       });
+    }
+
+    if (nonce.length < 16 || nonce.length > 128) {
+      return res.status(401).json({ error: "Invalid nonce" });
     }
 
     const timestampMs = Number.parseInt(timestamp, 10);
@@ -62,30 +67,30 @@ const validateAPIKey = async (req, res, next) => {
     const expectedV2Signature = buildSignatureFromSigningKey({
       signingKey: keyDoc.secret_key_hash,
       timestamp,
+      nonce,
       assetId: assetIdHeader,
       payloadHash,
     });
 
-    let signatureOk = false;
-
-    if (signatureVersion === SIGNATURE_VERSION) {
-      signatureOk = isValidSignature(signature, expectedV2Signature);
-    } else if (legacySecret) {
-      const legacySecretHash = crypto.createHash("sha256").update(legacySecret).digest("hex");
-
-      if (legacySecretHash === keyDoc.secret_key_hash) {
-        const expectedLegacySignature = buildLegacySignature({
-          apiSecret: legacySecret,
-          timestamp,
-          body: req.body || {},
-          rawBody: req.rawBody || "",
-        });
-        signatureOk = isValidSignature(signature, expectedLegacySignature);
-      }
+    if (signatureVersion !== SIGNATURE_VERSION) {
+      return res.status(401).json({ error: "Unsupported signature version" });
     }
+
+    const signatureOk = isValidSignature(signature, expectedV2Signature);
 
     if (!signatureOk) {
       return res.status(401).json({ error: "Invalid request signature" });
+    }
+
+    const nonceAccepted = await reserveNonce({
+      nonce,
+      apiKeyToken: token,
+      assetIdentifier: assetIdHeader,
+      ttlMs: config.ingestNonceTtlMs,
+    });
+
+    if (!nonceAccepted) {
+      return res.status(409).json({ error: "Replay detected" });
     }
 
     req.orgId = keyDoc._org_id;
@@ -113,7 +118,7 @@ const validateAPIKey = async (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error("[Ingest Auth Error]", error);
+    appLogger.error("Ingest authentication failed", serializeError(error));
     return res.status(500).json({ error: "Ingest authentication failed" });
   }
 };

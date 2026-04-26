@@ -8,6 +8,8 @@ const ProcessCollector = require("./collectors/process.collector");
 const FilewatchCollector = require("./collectors/filewatch.collector");
 const HeartbeatCollector = require("./collectors/heartbeat.collector");
 const SystemCollector = require("./collectors/system.collector");
+const WindowsEventCollector = require("./collectors/windows-event.collector");
+const SpoolStore = require("./utils/spoolStore");
 
 const splitList = (value = "") =>
   String(value)
@@ -25,9 +27,16 @@ const config = {
   maxRetries: Number(process.env.MAX_RETRIES || 3),
   systemIntervalMs: Number(process.env.SYSTEM_INTERVAL_MS || 15000),
   processIntervalMs: Number(process.env.PROCESS_INTERVAL_MS || 12000),
+  windowsEventIntervalMs: Number(process.env.WINDOWS_EVENT_INTERVAL_MS || 10000),
+  windowsEventEnabled:
+    String(process.env.WINDOWS_EVENT_COLLECTION_ENABLED || "true").toLowerCase() === "true",
   heartbeatIntervalMs: Number(process.env.HEARTBEAT_INTERVAL_MS || 15000),
+  maxBufferSize: Number(process.env.MAX_BUFFER_SIZE || 1000),
   fileWatchPaths: splitList(process.env.FILE_WATCH_PATHS || process.env.FILEWATCH_PATHS || ""),
   fileWatchEnabled: String(process.env.FILE_WATCH_ENABLED || "true").toLowerCase() === "true",
+  spoolPath:
+    process.env.SPOOL_FILE_PATH ||
+    path.join(__dirname, "agent-data", "host-events-spool.jsonl"),
 };
 
 class ThreatLensHostAgent {
@@ -38,16 +47,24 @@ class ThreatLensHostAgent {
     this.processCollector = new ProcessCollector();
     this.systemCollector = new SystemCollector();
     this.heartbeatCollector = new HeartbeatCollector();
+    this.windowsEventCollector = new WindowsEventCollector();
     this.filewatchCollector = new FilewatchCollector({
       paths: runtimeConfig.fileWatchPaths,
     });
+    this.spoolStore = new SpoolStore(runtimeConfig.spoolPath);
     this.buffer = [];
     this.timers = [];
     this.flushing = false;
   }
 
   enqueue(event) {
+    if (this.buffer.length >= this.config.maxBufferSize) {
+      this.buffer.shift();
+      logger.warn(`Host agent buffer limit reached. Dropping oldest event to stay within ${this.config.maxBufferSize}.`);
+    }
+
     this.buffer.push(event);
+    this.spoolStore.persist(this.buffer);
     logger.info(`Buffered event: ${event.eventType} (${this.buffer.length})`);
 
     if (this.buffer.length >= this.config.batchSize) {
@@ -70,6 +87,7 @@ class ThreatLensHostAgent {
       logger.info(
         `Submitted ${batch.length} host event(s). Inserted: ${result?.inserted ?? "n/a"}`
       );
+      this.spoolStore.persist(this.buffer);
     } catch (error) {
       logger.error(
         `Host event submission failed: ${
@@ -79,6 +97,10 @@ class ThreatLensHostAgent {
         }`
       );
       this.buffer.unshift(...batch);
+      if (this.buffer.length > this.config.maxBufferSize) {
+        this.buffer = this.buffer.slice(0, this.config.maxBufferSize);
+      }
+      this.spoolStore.persist(this.buffer);
     } finally {
       this.flushing = false;
     }
@@ -92,6 +114,9 @@ class ThreatLensHostAgent {
       telemetryTypes: [
         "host",
         "process",
+        ...(this.config.windowsEventEnabled && process.platform === "win32"
+          ? ["windows-eventlog"]
+          : []),
         ...(this.config.fileWatchEnabled && this.config.fileWatchPaths.length > 0 ? ["filewatch"] : []),
       ],
       queueDepth: this.buffer.length,
@@ -155,6 +180,18 @@ class ThreatLensHostAgent {
       }, this.config.processIntervalMs)
     );
 
+    if (this.config.windowsEventEnabled && process.platform === "win32") {
+      this.timers.push(
+        setInterval(async () => {
+          const events = await this.windowsEventCollector.collect();
+          events.forEach((event) => this.enqueue(event));
+        }, this.config.windowsEventIntervalMs)
+      );
+      logger.info("Windows Event Log collector enabled");
+    } else {
+      logger.info("Windows Event Log collector disabled or unsupported on this platform");
+    }
+
     this.timers.push(
       setInterval(() => {
         void this.sendHeartbeat();
@@ -180,6 +217,15 @@ class ThreatLensHostAgent {
     logger.info(`Backend URL: ${this.config.apiUrl}`);
     logger.info(`Asset ID: ${this.config.assetId}`);
 
+    this.buffer = this.spoolStore.load();
+    if (this.buffer.length > this.config.maxBufferSize) {
+      this.buffer = this.buffer.slice(0, this.config.maxBufferSize);
+      this.spoolStore.persist(this.buffer);
+    }
+    if (this.buffer.length > 0) {
+      logger.info(`Recovered ${this.buffer.length} buffered event(s) from local spool`);
+    }
+
     try {
       await this.apiClient.healthCheck();
       logger.info("Backend connected");
@@ -194,6 +240,10 @@ class ThreatLensHostAgent {
     }
 
     this.startCollectors();
+    if (this.config.windowsEventEnabled && process.platform === "win32") {
+      const startupWindowsEvents = await this.windowsEventCollector.collect();
+      startupWindowsEvents.forEach((event) => this.enqueue(event));
+    }
     await this.sendHeartbeat();
     await this.flush();
 

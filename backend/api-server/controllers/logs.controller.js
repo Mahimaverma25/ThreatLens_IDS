@@ -1,10 +1,13 @@
+const fs = require("fs/promises");
 const { parse } = require("csv-parse/sync");
 
 const Log = require("../models/Log");
 const { analyzeLogs } = require("../services/detection.service");
 const { createDetectionAlert } = require("../services/detection.service");
+const { enqueueDetectionJob } = require("../services/detection-queue.service");
 const { publishEvent } = require("../services/event-stream.service");
 const { normalizeSecurityEvent, toSafeNumber } = require("../services/normalization.service");
+const { appLogger, serializeError } = require("../utils/logger");
 const {
   emitDashboardUpdate,
   emitNewLog,
@@ -16,6 +19,11 @@ const clampInt = (value, fallback, min, max) => {
   if (Number.isNaN(parsed)) return fallback;
   return Math.min(Math.max(parsed, min), max);
 };
+
+const MAX_SEARCH_LENGTH = 100;
+
+const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const DATASET_REQUIRED_HEADERS = [
   "protocol_type",
@@ -487,11 +495,9 @@ const emitLogsCreated = ({ orgId, logs, source, duplicateCount = 0, mode = "live
   });
 };
 
-const runDetections = async (logs) => {
-  return analyzeLogs(logs);
-};
+const runDetections = async (logs) => analyzeLogs(logs);
 
-const persistLogs = async (entries, { orgId, source, mode }) => {
+const persistLogs = async (entries, { orgId, source, mode, asyncDetections = false }) => {
   const deduped = [];
   const seenEventIds = new Set();
   let duplicateCount = 0;
@@ -553,7 +559,25 @@ const persistLogs = async (entries, { orgId, source, mode }) => {
 
   duplicateCount += deduped.length - stored.length;
 
-  const idsAnalysis = await runDetections(stored);
+  const idsAnalysis = asyncDetections
+    ? (() => {
+        const { queued, queueDepth } = enqueueDetectionJob({
+          orgId,
+          logIds: stored.map((log) => log._id),
+          onError: (error) => {
+            appLogger.error("Background detection job failed", serializeError(error));
+          },
+        });
+
+        return {
+          status: queued ? "queued" : "skipped",
+          analyzed: 0,
+          results: [],
+          detections: 0,
+          queueDepth,
+        };
+      })()
+    : await runDetections(stored);
 
   await publishEvent("telemetry.batch.persisted", {
     organizationId: orgId?.toString?.() || orgId || null,
@@ -638,13 +662,19 @@ const listLogs = async (req, res) => {
       }
     }
 
-    if (req.query.search) {
+    const rawSearch = String(req.query.search || "").trim();
+    if (rawSearch.length > MAX_SEARCH_LENGTH) {
+      return res.status(400).json({ message: "Search term too long" });
+    }
+
+    if (rawSearch) {
+      const safeSearch = escapeRegex(rawSearch);
       const searchFilters = [
-        { message: { $regex: req.query.search, $options: "i" } },
-        { eventType: { $regex: req.query.search, $options: "i" } },
-        { "metadata.protocol": { $regex: req.query.search, $options: "i" } },
-        { "metadata.appProtocol": { $regex: req.query.search, $options: "i" } },
-        { "metadata.snort.classification": { $regex: req.query.search, $options: "i" } },
+        { message: { $regex: safeSearch, $options: "i" } },
+        { eventType: { $regex: safeSearch, $options: "i" } },
+        { "metadata.protocol": { $regex: safeSearch, $options: "i" } },
+        { "metadata.appProtocol": { $regex: safeSearch, $options: "i" } },
+        { "metadata.snort.classification": { $regex: safeSearch, $options: "i" } },
       ];
 
       filters.$and = filters.$and || [];
@@ -661,7 +691,7 @@ const listLogs = async (req, res) => {
       pagination: { total, page, limit },
     });
   } catch (error) {
-    console.error("listLogs error:", error);
+    appLogger.error("Failed to list logs", serializeError(error));
     return res.status(500).json({ message: "Failed to fetch logs" });
   }
 };
@@ -699,7 +729,7 @@ const createLog = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("createLog error:", error);
+    appLogger.error("Failed to create log", serializeError(error));
     return res.status(500).json({ message: "Failed to create log" });
   }
 };
@@ -734,6 +764,7 @@ const ingestLogs = async (req, res) => {
       orgId: req.orgId,
       source: "agent",
       mode: "live-ingest",
+      asyncDetections: true,
     });
 
     return res.status(201).json({
@@ -744,12 +775,14 @@ const ingestLogs = async (req, res) => {
       idsAnalyzed: result.idsAnalysis.analyzed || 0,
     });
   } catch (error) {
-    console.error("ingestLogs error:", error);
+    appLogger.error("Failed to ingest logs", serializeError(error));
     return res.status(500).json({ message: "Failed to ingest logs" });
   }
 };
 
 const uploadLogs = async (req, res) => {
+  let uploadedFilePath = "";
+
   try {
     if (!req.file) {
       return res.status(400).json({ message: "Upload file required" });
@@ -759,7 +792,8 @@ const uploadLogs = async (req, res) => {
       return res.status(400).json({ message: "Organization not found" });
     }
 
-    const content = req.file.buffer.toString("utf-8");
+    uploadedFilePath = req.file.path || "";
+    const content = await fs.readFile(uploadedFilePath, "utf8");
     let items = [];
     let detectedHeaders = [];
     let invalidRows = [];
@@ -854,13 +888,19 @@ const uploadLogs = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("uploadLogs error:", error);
+    appLogger.error("Failed to upload logs", serializeError(error));
     return res.status(500).json({
       message:
-        error?.message?.includes("Unsupported file type")
+        error?.message?.includes("Unsupported file type") ||
+        error?.message?.includes("Invalid upload MIME type") ||
+        error?.message?.includes("Invalid CSV upload type")
           ? error.message
           : "Failed to upload logs",
     });
+  } finally {
+    if (uploadedFilePath) {
+      await fs.unlink(uploadedFilePath).catch(() => {});
+    }
   }
 };
 

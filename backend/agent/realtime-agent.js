@@ -43,6 +43,7 @@ const config = {
   healthCheckIntervalMs: Number(process.env.HEALTH_CHECK_INTERVAL_MS || 60000),
   heartbeatIntervalMs: Number(process.env.HEARTBEAT_INTERVAL_MS || 15000),
   maxRetries: Number(process.env.MAX_RETRIES || 3),
+  maxBufferSize: Number(process.env.MAX_BUFFER_SIZE || 5000),
   snortFastLogPaths: resolvePaths(
     splitList(process.env.SNORT_FAST_LOG_PATHS || process.env.SNORT_FAST_LOG_PATH || ""),
     DEFAULT_WINDOWS_SNORT_PATHS.fast
@@ -65,6 +66,13 @@ class RealtimeAgent {
   }
 
   enqueue(event) {
+    if (this.buffer.length >= this.config.maxBufferSize) {
+      this.buffer.shift();
+      logger.warn(
+        `Realtime IDS buffer limit reached. Dropping oldest event to stay within ${this.config.maxBufferSize}.`
+      );
+    }
+
     this.buffer.push(event);
     logger.info(`Buffered realtime IDS event: ${event.message} (${this.buffer.length})`);
 
@@ -96,6 +104,9 @@ class RealtimeAgent {
         }`
       );
       this.buffer.unshift(...batch);
+      if (this.buffer.length > this.config.maxBufferSize) {
+        this.buffer = this.buffer.slice(0, this.config.maxBufferSize);
+      }
     } finally {
       this.flushing = false;
     }

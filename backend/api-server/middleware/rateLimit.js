@@ -44,4 +44,14 @@ const authLimiter = rateLimit({
 	message: { message: "Too many auth attempts, please try again later." }
 });
 
-module.exports = { apiLimiter, authLimiter };
+const agentLimiter = rateLimit({
+	windowMs: config.rateLimitWindowMs,
+	max: config.agentRateLimitMax,
+	standardHeaders: true,
+	legacyHeaders: false,
+	keyGenerator: (req) =>
+		String(req.headers["x-api-key"] || req.headers["x-asset-id"] || req.ip || "unknown"),
+	message: { message: "Too many ingest requests, please try again later." }
+});
+
+module.exports = { apiLimiter, authLimiter, agentLimiter };

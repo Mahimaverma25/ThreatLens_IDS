@@ -8,9 +8,20 @@ const normalizeUserRole = (user) => {
     return user;
   }
 
+  const normalizedRole =
+    String(user.role || "")
+      .toLowerCase()
+      .trim() === "user"
+      ? "analyst"
+      : String(user.role || "")
+          .toLowerCase()
+          .trim();
+
   return {
     ...user,
-    role: ["admin", "analyst", "viewer"].includes(user.role) ? user.role : "viewer",
+    role: ["admin", "analyst", "viewer"].includes(normalizedRole)
+      ? normalizedRole
+      : "viewer",
   };
 };
 

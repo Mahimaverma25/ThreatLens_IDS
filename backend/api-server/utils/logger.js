@@ -2,6 +2,51 @@ const fs = require("fs");
 const path = require("path");
 const winston = require("winston");
 
+const REDACTED_KEYS = [
+  "authorization",
+  "cookie",
+  "jwt",
+  "jwtSecret",
+  "refreshTokenSecret",
+  "secret",
+  "secret_key_hash",
+  "token",
+  "x-api-key",
+  "x-signature",
+  "x-integration-api-key",
+  "mongoUri",
+];
+
+const sanitizeForLogs = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForLogs(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.entries(value).reduce((result, [key, entryValue]) => {
+    if (REDACTED_KEYS.includes(key)) {
+      result[key] = "[REDACTED]";
+      return result;
+    }
+
+    result[key] = sanitizeForLogs(entryValue);
+    return result;
+  }, {});
+};
+
+const serializeError = (error) =>
+  sanitizeForLogs({
+    name: error?.name,
+    message: error?.message,
+    code: error?.code,
+    status: error?.status,
+    statusCode: error?.statusCode,
+    response: error?.response?.data,
+  });
+
 const logsDir = path.join(__dirname, "..", "logs");
 if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
@@ -10,7 +55,8 @@ if (!fs.existsSync(logsDir)) {
 const baseFormat = winston.format.combine(
   winston.format.timestamp(),
   winston.format.printf(({ level, message, timestamp, ...meta }) => {
-    const metaString = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : "";
+    const sanitizedMeta = sanitizeForLogs(meta);
+    const metaString = Object.keys(sanitizedMeta).length ? ` ${JSON.stringify(sanitizedMeta)}` : "";
     return `${timestamp} ${level} ${message}${metaString}`;
   })
 );
@@ -32,4 +78,4 @@ const auditLogger = winston.createLogger({
   ]
 });
 
-module.exports = { appLogger, auditLogger };
+module.exports = { appLogger, auditLogger, sanitizeForLogs, serializeError };

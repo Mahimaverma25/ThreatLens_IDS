@@ -1,3 +1,5 @@
+import hmac
+
 from flask import Blueprint, jsonify, request
 
 from config import config
@@ -11,7 +13,7 @@ def _require_api_key():
         return None
 
     provided = request.headers.get("x-integration-api-key", "")
-    if provided != config.API_KEY:
+    if not hmac.compare_digest(provided, config.API_KEY):
         return jsonify({"message": "Unauthorized"}), 401
 
     return None

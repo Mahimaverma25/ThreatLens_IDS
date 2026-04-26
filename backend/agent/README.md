@@ -12,6 +12,8 @@ Both entrypoints use the same authenticated API client and current backend `v2` 
 - shared logger moved to `utils/logger.js`
 - shared API signing and transport moved to `services/apiClient.js`
 - host collectors added for auth, process, file watch, system, and heartbeat payloads
+- Windows Event Log collection added for auth, privilege, process, service, and PowerShell events
+- local event spool added so buffered events survive temporary backend outages
 - `npm start` now launches the host agent
 - `npm run start:realtime` launches the Snort/realtime agent
 
@@ -52,8 +54,10 @@ The host agent currently sends:
 - startup auth-style activity
 - periodic system telemetry
 - periodic process telemetry for the running agent process
+- Windows Security/System/PowerShell event telemetry when running on Windows
 - file watch telemetry from `FILE_WATCH_PATHS`
 - signed collector heartbeat updates to `/api/agents/heartbeat`
+- local disk spool recovery for unsent events
 
 ## Realtime Agent Inputs
 
@@ -75,11 +79,14 @@ FILE_WATCH_ENABLED=true
 FILE_WATCH_PATHS=C:\Users\Public,C:\Windows\Temp
 SYSTEM_INTERVAL_MS=15000
 PROCESS_INTERVAL_MS=12000
+WINDOWS_EVENT_COLLECTION_ENABLED=true
+WINDOWS_EVENT_INTERVAL_MS=10000
 HEARTBEAT_INTERVAL_MS=15000
 SNORT_FAST_LOG_PATH=C:\snort\log\alert_fast.txt
 SNORT_EVE_JSON_PATH=C:\snort\log\eve.json
 BATCH_SIZE=20
 MAX_RETRIES=3
+SPOOL_FILE_PATH=
 LOG_LEVEL=info
 ```
 

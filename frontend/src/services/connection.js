@@ -14,6 +14,13 @@ const resolveConfiguredApiBaseUrl = () => {
   const configuredBaseUrl = (process.env.REACT_APP_API_URL || "").trim();
 
   if (!configuredBaseUrl) {
+    if (typeof window !== "undefined") {
+      const appHostname = window.location.hostname || "localhost";
+      if (isLocalHostname(appHostname)) {
+        return `http://${appHostname}:5000/api`;
+      }
+    }
+
     return "/api";
   }
 
@@ -48,8 +55,6 @@ const buildLocalApiBaseCandidates = (configuredApiBaseUrl) => {
     }
   };
 
-  pushCandidate(configuredApiBaseUrl);
-
   try {
     const appUrl = new URL(getWindowOrigin());
     const configuredUrl = new URL(configuredApiBaseUrl, getWindowOrigin());
@@ -57,19 +62,19 @@ const buildLocalApiBaseCandidates = (configuredApiBaseUrl) => {
       configuredApiBaseUrl === "/api" ||
       (isLocalHostname(appUrl.hostname) && isLocalHostname(configuredUrl.hostname));
 
-    if (!localConfigured) {
-      return candidates;
+    if (localConfigured) {
+      const protocol = configuredUrl.protocol || appUrl.protocol || "http:";
+      const hostname = configuredUrl.hostname || appUrl.hostname || "localhost";
+
+      LOCAL_API_CANDIDATE_PORTS.forEach((port) => {
+        pushCandidate(`${protocol}//${hostname}:${port}/api`);
+      });
     }
-
-    const protocol = configuredUrl.protocol || appUrl.protocol || "http:";
-    const hostname = configuredUrl.hostname || appUrl.hostname || "localhost";
-
-    LOCAL_API_CANDIDATE_PORTS.forEach((port) => {
-      pushCandidate(`${protocol}//${hostname}:${port}/api`);
-    });
   } catch {
-    // Ignore URL parsing problems and keep the configured candidate only.
+    // Ignore URL parsing problems and fall back to the configured candidate below.
   }
+
+  pushCandidate(configuredApiBaseUrl);
 
   return candidates;
 };

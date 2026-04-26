@@ -17,19 +17,20 @@ const buildPayloadHash = (body, rawBody = "") => sha256(getPayloadString(body, r
 
 const deriveSigningKey = (secret) => sha256(secret);
 
-const buildSigningContent = ({ timestamp, assetId, payloadHash }) =>
-  `${timestamp}.${assetId}.${payloadHash}`;
+const buildSigningContent = ({ timestamp, nonce, assetId, payloadHash }) =>
+  `${timestamp}.${nonce}.${assetId}.${payloadHash}`;
 
-const buildSignatureFromSigningKey = ({ signingKey, timestamp, assetId, payloadHash }) =>
+const buildSignatureFromSigningKey = ({ signingKey, timestamp, nonce, assetId, payloadHash }) =>
   crypto
     .createHmac("sha256", signingKey)
-    .update(buildSigningContent({ timestamp, assetId, payloadHash }), "utf8")
+    .update(buildSigningContent({ timestamp, nonce, assetId, payloadHash }), "utf8")
     .digest("hex");
 
-const buildSignature = ({ apiSecret, timestamp, assetId, body, rawBody = "" }) =>
+const buildSignature = ({ apiSecret, timestamp, nonce, assetId, body, rawBody = "" }) =>
   buildSignatureFromSigningKey({
     signingKey: deriveSigningKey(apiSecret),
     timestamp,
+    nonce,
     assetId,
     payloadHash: buildPayloadHash(body, rawBody),
   });
@@ -46,6 +47,7 @@ module.exports = {
   getPayloadString,
   buildPayloadHash,
   deriveSigningKey,
+  buildSigningContent,
   buildSignatureFromSigningKey,
   buildSignature,
   buildLegacySignature,

@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { getActiveApiBaseUrl } from "../services/connection";
 import "../styles/auth.css";
 
-const API_TARGET =
-  process.env.REACT_APP_API_URL || "https://threatlens-api-vav3.onrender.com/api";
+const API_TARGET = getActiveApiBaseUrl();
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -21,7 +21,7 @@ const Login = () => {
     }
 
     if (err?.message === "Network Error") {
-      return `Unable to reach the ThreatLens API at ${API_TARGET}. Make sure the Render API is awake and accepting requests.`;
+      return `Unable to reach the ThreatLens API at ${API_TARGET}. Make sure the local backend is running and reachable.`;
     }
 
     return err?.message || "Login failed. Please try again.";

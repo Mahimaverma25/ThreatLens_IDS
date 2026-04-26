@@ -148,12 +148,12 @@ const LiveMonitoring = () => {
       fetchMonitoring(true);
 
       const fallbackMessages = [
-        "Scanning live telemetry stream...",
-        "Checking IDS engine health...",
-        "Listening for Snort/NIDS alerts...",
-        "Listening for HIDS agent logs...",
-        "Analyzing network flow metadata...",
-        "No critical threat detected in current cycle.",
+        "Polling live telemetry health...",
+        "Checking IDS engine availability...",
+        "Waiting for new Snort/NIDS events...",
+        "Waiting for new HIDS agent events...",
+        "Refreshing dashboard state...",
+        "Collector connected. Awaiting next event batch.",
       ];
 
       pushConsoleLine(fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)]);
@@ -519,13 +519,13 @@ const LiveMonitoring = () => {
           <section className="monitor-hero">
             <h1>〽️ Live Network Monitoring</h1>
             <p>
-              Intrusion detection and real-time threat analysis powered by machine learning,
+              Intrusion detection and near real-time threat analysis powered by machine learning,
               live collectors, Socket.io, HIDS and NIDS telemetry.
             </p>
             <div className="monitor-badges">
-              <span>🛡 Powered by Machine Learning</span>
-              <span>📈 Real-time</span>
-              <span>⚡ Zero Latency</span>
+              <span>ML-Assisted Detection</span>
+              <span>Live Streaming</span>
+              <span>Near Real-Time</span>
             </div>
           </section>
 
@@ -534,7 +534,7 @@ const LiveMonitoring = () => {
           <section className="monitor-stats">
             <div className="monitor-stat-card">
               <strong>{recentLogs.length}</strong>
-              <span>Packets Analyzed</span>
+              <span>Events Observed</span>
             </div>
             <div className="monitor-stat-card">
               <strong>{recentAlerts.length}</strong>
@@ -552,8 +552,8 @@ const LiveMonitoring = () => {
                 <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                   <div className="live-dot" />
                   <div>
-                    <h3>Live packet analysis engine</h3>
-                    <p>Live packet analysis engine and real-time threat detection</p>
+                    <h3>Live telemetry monitoring</h3>
+                    <p>Collector-driven HIDS/NIDS telemetry and threat detection</p>
                   </div>
                 </div>
 
@@ -593,7 +593,7 @@ const LiveMonitoring = () => {
                     <section>
                       <div>▻_</div>
                       <p>Advanced Monitoring Console Ready</p>
-                      <p>Click “Start Monitoring” to begin real-time network analysis</p>
+                      <p>Click "Start Monitoring" to begin live telemetry tracking</p>
                     </section>
                   </div>
                 )}
@@ -620,14 +620,14 @@ const LiveMonitoring = () => {
 
               <div className="side-section">
                 <div className="overview-box">
-                  <h4>⚙️ AI Detection Engine</h4>
-                  <p>Advanced machine learning models analyze network patterns for threat detection.</p>
+                  <h4>ML Detection Engine</h4>
+                  <p>Machine learning enriches events after ingest and works alongside rule-based detections.</p>
 
-                  <h4>⚡ Real-time Alerts</h4>
-                  <p>Security events are automatically classified and displayed.</p>
+                  <h4>Live Alerts</h4>
+                  <p>Security events are streamed to the dashboard as new logs and alerts arrive.</p>
 
-                  <h4>🛡 Zero Impact Mode</h4>
-                  <p>Web monitoring operates independently without affecting IDS performance.</p>
+                  <h4>Buffered Pipeline</h4>
+                  <p>Agents batch and forward events, so dashboard updates are near real-time rather than zero-latency.</p>
                 </div>
 
                 <div className="health-list">

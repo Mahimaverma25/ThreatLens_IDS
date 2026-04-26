@@ -11,13 +11,14 @@ const buildPayloadHash = (body) => sha256(getPayloadString(body));
 
 const deriveSigningKey = (secret) => sha256(secret);
 
-const buildSignature = ({ apiSecret, timestamp, assetId, body }) =>
+const buildSignature = ({ apiSecret, timestamp, nonce, assetId, body }) =>
   crypto
     .createHmac("sha256", deriveSigningKey(apiSecret))
-    .update(`${timestamp}.${assetId}.${buildPayloadHash(body)}`, "utf8")
+    .update(`${timestamp}.${nonce}.${assetId}.${buildPayloadHash(body)}`, "utf8")
     .digest("hex");
 
 module.exports = {
   SIGNATURE_VERSION,
+  buildPayloadHash,
   buildSignature,
 };

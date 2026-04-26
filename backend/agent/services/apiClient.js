@@ -11,11 +11,13 @@ const getPayloadHash = (body) =>
   crypto.createHash("sha256").update(JSON.stringify(body), "utf8").digest("hex");
 const getSigningKey = (secret) =>
   crypto.createHash("sha256").update(String(secret || ""), "utf8").digest("hex");
-const buildSignature = ({ secret, timestamp, assetId, body }) =>
+const buildSignature = ({ secret, timestamp, nonce, assetId, body }) =>
   crypto
     .createHmac("sha256", getSigningKey(secret))
-    .update(`${timestamp}.${assetId}.${getPayloadHash(body)}`, "utf8")
+    .update(`${timestamp}.${nonce}.${assetId}.${getPayloadHash(body)}`, "utf8")
     .digest("hex");
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class ThreatLensAPIClient {
   constructor(options = {}) {
@@ -26,6 +28,12 @@ class ThreatLensAPIClient {
     this.apiSecret = options.apiSecret || process.env.THREATLENS_API_SECRET || "";
     this.assetId = options.assetId || process.env.ASSET_ID || "";
     this.maxRetries = Number(options.maxRetries || process.env.MAX_RETRIES || 3);
+    this.retryBaseDelayMs = Number(
+      options.retryBaseDelayMs || process.env.RETRY_BASE_DELAY_MS || 1000
+    );
+    this.maxRetryDelayMs = Number(
+      options.maxRetryDelayMs || process.env.MAX_RETRY_DELAY_MS || 15000
+    );
 
     this.client = axios.create({
       baseURL: this.apiUrl,
@@ -39,9 +47,11 @@ class ThreatLensAPIClient {
 
   buildHeaders(body) {
     const timestamp = Date.now().toString();
+    const nonce = crypto.randomBytes(16).toString("hex");
     const signature = buildSignature({
       secret: this.apiSecret,
       timestamp,
+      nonce,
       assetId: this.assetId,
       body,
     });
@@ -52,8 +62,15 @@ class ThreatLensAPIClient {
       "x-timestamp": timestamp,
       "x-signature": signature,
       "x-signature-version": "v2",
+      "x-nonce": nonce,
       "x-asset-id": this.assetId,
     };
+  }
+
+  getRetryDelay(attempt) {
+    const exponential = this.retryBaseDelayMs * 2 ** Math.max(attempt - 1, 0);
+    const jitter = Math.floor(Math.random() * Math.max(250, this.retryBaseDelayMs));
+    return Math.min(this.maxRetryDelayMs, exponential + jitter);
   }
 
   async submitLogs(logs, attempt = 1) {
@@ -69,10 +86,14 @@ class ThreatLensAPIClient {
       });
       return response.data;
     } catch (error) {
-      if (attempt >= this.maxRetries || error.response?.status === 401) {
+      if (
+        attempt >= this.maxRetries ||
+        [401, 409].includes(Number(error.response?.status || 0))
+      ) {
         throw error;
       }
 
+      await wait(this.getRetryDelay(attempt));
       return this.submitLogs(payload.logs, attempt + 1);
     }
   }
@@ -88,10 +109,14 @@ class ThreatLensAPIClient {
       });
       return response.data;
     } catch (error) {
-      if (attempt >= this.maxRetries || error.response?.status === 401) {
+      if (
+        attempt >= this.maxRetries ||
+        [401, 409].includes(Number(error.response?.status || 0))
+      ) {
         throw error;
       }
 
+      await wait(this.getRetryDelay(attempt));
       return this.sendHeartbeat(payload, attempt + 1);
     }
   }

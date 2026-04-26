@@ -64,7 +64,9 @@ const allowedOrigins = normalizeOrigins(
 const isAllowedOrigin = (origin) => {
   if (!origin) return true; // Postman, curl, server-to-server
 
-  if (allowedOrigins.length === 0) return true; // fallback for dev
+  if (allowedOrigins.length === 0) {
+    return config.nodeEnv !== "production";
+  }
 
   if (config.nodeEnv !== "production") {
     try {
@@ -247,7 +249,7 @@ const startServer = async () => {
         );
         console.log(
           `Allowed CORS origins: ${
-            allowedOrigins.length ? allowedOrigins.join(", ") : "ALL (dev fallback)"
+            allowedOrigins.length ? allowedOrigins.join(", ") : "LOCAL DEVELOPMENT ONLY"
           }`
         );
 
