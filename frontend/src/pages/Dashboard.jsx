@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -1134,6 +1135,7 @@ const Dashboard = () => {
                       ))}
                     </Pie>
                     <Tooltip />
+                    <Legend />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (

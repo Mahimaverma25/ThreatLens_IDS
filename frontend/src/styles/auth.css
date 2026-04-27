@@ -105,7 +105,8 @@
   letter-spacing: 0.03em;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
   width: 100%;
   box-sizing: border-box;
   padding: 14px 15px;
@@ -121,14 +122,16 @@
   color: #6c8197;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-group select:focus {
   outline: none;
   border-color: rgba(85, 211, 255, 0.8);
   box-shadow: 0 0 0 4px rgba(72, 200, 255, 0.14), 0 0 24px rgba(72, 200, 255, 0.16);
   transform: translateY(-1px);
 }
 
-.form-group input:disabled {
+.form-group input:disabled,
+.form-group select:disabled {
   opacity: 0.65;
   cursor: not-allowed;
 }

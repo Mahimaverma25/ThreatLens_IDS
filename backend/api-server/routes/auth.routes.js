@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const { body } = require("express-validator");
+const { ROLE_ADMIN, ROLE_ANALYST, ROLE_VIEWER } = require("../utils/roles");
 
 const { validateRequest } = require("../middleware/validate.middleware");
 const authenticate = require("../middleware/auth.middleware");
@@ -34,7 +35,15 @@ router.post(
       .optional()
       .trim()
       .isLength({ min: 2 })
-      .withMessage("Username must be at least 2 characters")
+      .withMessage("Username must be at least 2 characters"),
+
+    body("role")
+      .optional()
+      .trim()
+      .isIn([ROLE_ADMIN, ROLE_ANALYST, ROLE_VIEWER, "user"])
+      .withMessage("Role must be admin, analyst, or viewer"),
+
+    body("accessCode").optional().trim()
   ],
   validateRequest,
   asyncHandler(register)
@@ -54,7 +63,13 @@ router.post(
     body("password")
       .trim()
       .notEmpty()
-      .withMessage("Password is required")
+      .withMessage("Password is required"),
+
+    body("role")
+      .optional()
+      .trim()
+      .isIn([ROLE_ADMIN, ROLE_ANALYST, ROLE_VIEWER, "user"])
+      .withMessage("Role must be admin, analyst, or viewer")
   ],
   validateRequest,
   asyncHandler(login)

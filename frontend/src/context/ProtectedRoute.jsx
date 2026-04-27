@@ -8,7 +8,7 @@ const normalizeRole = (role) => {
 
   const value = String(role).toLowerCase().trim();
 
-  if (value === "user") return "analyst";
+  if (value === "user") return "viewer";
 
   return value;
 };
@@ -20,7 +20,7 @@ const getDefaultRoute = (role) => {
 
   if (r === "admin") return "/dashboard";
   if (r === "analyst") return "/dashboard";
-  if (r === "user") return "/logs";
+  if (r === "viewer") return "/dashboard";
 
   return "/dashboard";
 };

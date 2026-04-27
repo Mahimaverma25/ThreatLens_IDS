@@ -170,18 +170,20 @@ api.interceptors.response.use(
 /* ================= AUTH ================= */
 
 export const auth = {
-  register: (email, password, username, role) =>
+  register: (email, password, username, role, accessCode) =>
     api.post("/auth/register", {
       email: email.trim(),
       password: password.trim(),
       username,
       role,
+      accessCode,
     }),
 
-  login: (email, password) =>
+  login: (email, password, role) =>
     api.post("/auth/login", {
       email: email.trim(),
       password: password.trim(),
+      role,
     }),
 
   refresh: () => api.post("/auth/refresh"),
@@ -257,9 +259,12 @@ export const intel = {
 };
 
 export const incidents = {
-  list: (filters = {}) => api.get("/incidents", { params: filters }),
+  list: (params = {}) => api.get("/incidents", { params }),
   get: (id) => api.get(`/incidents/${id}`),
+  create: (payload) => api.post("/incidents", payload),
+  createFromAlert: (alertId) => api.post(`/incidents/from-alert/${alertId}`),
   update: (id, payload) => api.patch(`/incidents/${id}`, payload),
+  // delete: (id) => api.delete(`/incidents/${id}`),
 };
 
 export const rules = {

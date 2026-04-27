@@ -9,6 +9,7 @@ const API_TARGET = getActiveApiBaseUrl();
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState("viewer");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -33,18 +34,14 @@ const Login = () => {
     setLoading(true);
 
     try {
-      const res = await login(email, password);
+      const res = await login(email, password, role);
       const user = res?.user;
 
       if (!user) {
         throw new Error("Invalid server response");
       }
 
-      if (user.role === "admin") {
-        navigate("/");
-      } else {
-        navigate("/logs");
-      }
+      navigate("/dashboard");
     } catch (err) {
       console.error("Login error:", err);
       setError(formatLoginError(err));
@@ -63,6 +60,10 @@ const Login = () => {
           Access your monitoring workspace, review live telemetry, and respond to active threats.
         </p>
 
+        <div className="info-message">
+          Choose the portal role before signing in. Viewer is open for normal access, while Analyst and Admin must match the role assigned to the account.
+        </div>
+
         {error && <div className="error-message">{error}</div>}
 
         <form onSubmit={handleSubmit}>
@@ -75,8 +76,21 @@ const Login = () => {
               required
               disabled={loading}
               autoComplete="email"
-                placeholder="viewer@threatlens.com"
+              placeholder="viewer@threatlens.com"
             />
+          </div>
+
+          <div className="form-group">
+            <label>Role</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              disabled={loading}
+            >
+              <option value="viewer">Viewer</option>
+              <option value="analyst">Analyst</option>
+              <option value="admin">Admin</option>
+            </select>
           </div>
 
           <div className="form-group">

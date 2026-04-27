@@ -160,6 +160,7 @@ app.use("/api/alerts", authenticate, orgIsolation, alertRoutes);
 app.use("/api/dashboard", authenticate, orgIsolation, dashboardRoutes);
 app.use("/api/intel", authenticate, orgIsolation, intelRoutes);
 app.use("/api/incidents", authenticate, orgIsolation, incidentsRoutes);
+app.use("/api/incidents", require("./routes/incidents.routes"));
 app.use("/api/reports", authenticate, orgIsolation, reportRoutes);
 app.use("/api/playbooks", authenticate, orgIsolation, playbooksRoutes);
 app.use("/api/rules", authenticate, orgIsolation, rulesRoutes);

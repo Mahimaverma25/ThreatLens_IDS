@@ -14,7 +14,45 @@ const {
   hashToken,
   getRefreshTokenExpiry,
 } = require("../utils/tokens");
-const { normalizeRole, ROLE_VIEWER } = require("../utils/roles");
+const {
+  normalizeRole,
+  ROLE_ADMIN,
+  ROLE_ANALYST,
+  ROLE_VIEWER,
+} = require("../utils/roles");
+
+const PRIVILEGED_ROLE_MESSAGES = {
+  [ROLE_ADMIN]: "Admin access code is required to create an admin account",
+  [ROLE_ANALYST]: "Analyst access code is required to create an analyst account",
+};
+
+const resolveRequestedRole = (role) => {
+  const normalizedRole = normalizeRole(String(role || ROLE_VIEWER).trim().toLowerCase());
+  return [ROLE_ADMIN, ROLE_ANALYST, ROLE_VIEWER].includes(normalizedRole)
+    ? normalizedRole
+    : ROLE_VIEWER;
+};
+
+const validatePrivilegedRegistration = (role, accessCode) => {
+  if (role === ROLE_VIEWER) {
+    return null;
+  }
+
+  const expectedCode =
+    role === ROLE_ADMIN
+      ? config.adminRegistrationCode
+      : config.analystRegistrationCode;
+
+  if (!accessCode) {
+    return PRIVILEGED_ROLE_MESSAGES[role];
+  }
+
+  if (String(accessCode).trim() !== expectedCode) {
+    return `Invalid ${role} access code`;
+  }
+
+  return null;
+};
 
 const ensureStoredRole = async (user) => {
   const normalizedRole = normalizeRole(user.role);
@@ -167,7 +205,7 @@ const maybeRelinkViewerToPrimaryOrg = async (user) => {
 
 const register = async (req, res) => {
   try {
-    let { email, password, username, orgName } = req.body || {};
+    let { email, password, username, orgName, role, accessCode } = req.body || {};
 
     if (!email || !password) {
       return res.status(400).json({
@@ -177,6 +215,16 @@ const register = async (req, res) => {
 
     email = email.trim().toLowerCase();
     password = password.trim();
+    const requestedRole = resolveRequestedRole(role);
+
+    const privilegedRoleError = validatePrivilegedRegistration(
+      requestedRole,
+      accessCode
+    );
+
+    if (privilegedRoleError) {
+      return res.status(403).json({ message: privilegedRoleError });
+    }
 
     const existing = await User.findOne({ email });
     if (existing) {
@@ -190,7 +238,7 @@ const register = async (req, res) => {
       email,
       username,
       passwordHash,
-      role: ROLE_VIEWER,
+      role: requestedRole,
       _org_id: org._id,
     });
 
@@ -217,7 +265,7 @@ const register = async (req, res) => {
 
 const login = async (req, res) => {
   try {
-    let { email, password } = req.body || {};
+    let { email, password, role } = req.body || {};
 
     if (!email || !password) {
       return res.status(400).json({
@@ -227,6 +275,7 @@ const login = async (req, res) => {
 
     email = email.trim().toLowerCase();
     password = password.trim();
+    const requestedRole = role ? resolveRequestedRole(role) : null;
 
     const user = await User.findOne({ email }).select("+passwordHash");
 
@@ -264,6 +313,24 @@ const login = async (req, res) => {
         },
       });
       return res.status(401).json({ message: "Invalid password" });
+    }
+
+    if (requestedRole && user.role !== requestedRole) {
+      await createAuditLogSafe({
+        action: "auth.login",
+        userId: user._id,
+        _org_id: user._org_id,
+        ip: req.ip,
+        success: false,
+        metadata: {
+          reason: "role_mismatch",
+          requestedRole,
+          actualRole: user.role,
+        },
+      });
+      return res.status(403).json({
+        message: `This account is registered as ${user.role}, not ${requestedRole}`,
+      });
     }
 
     const accessToken = generateAccessToken(user);

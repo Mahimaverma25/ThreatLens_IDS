@@ -1,0 +1,4 @@
+protocol_type,src_bytes,dst_bytes,count,serror_rate,label,source_ip,destination_ip,failed_logins
+tcp,491,1200,28,0.96,neptune,192.168.1.12,10.10.20.7,0
+tcp,120,84,8,0.10,normal,192.168.1.99,10.10.20.21,0
+tcp,64,32,6,0.35,guess_passwd,192.168.1.44,10.10.20.45,5

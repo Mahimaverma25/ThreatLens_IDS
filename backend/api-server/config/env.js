@@ -60,6 +60,8 @@ module.exports = {
 	port: getNumber(process.env.PORT, 5000),
 	mongoUri,
 	frontendBaseUrl: process.env.FRONTEND_BASE_URL || "http://localhost:3000",
+	adminRegistrationCode: process.env.ADMIN_REGISTRATION_CODE || "ADMIN-ACCESS-2026",
+	analystRegistrationCode: process.env.ANALYST_REGISTRATION_CODE || "ANALYST-ACCESS-2026",
 	jwtSecret: getRequiredSecret("JWT_SECRET", "dev-local-access-secret"),
 	jwtExpiresIn: process.env.JWT_EXPIRES_IN || "1h",
 	refreshTokenSecret: getRequiredSecret("REFRESH_TOKEN_SECRET", "dev-local-refresh-secret"),

@@ -12,7 +12,7 @@ const normalizeUserRole = (user) => {
     String(user.role || "")
       .toLowerCase()
       .trim() === "user"
-      ? "analyst"
+      ? "viewer"
       : String(user.role || "")
           .toLowerCase()
           .trim();
@@ -89,8 +89,8 @@ export const AuthProvider = ({ children }) => {
 
   /* ================= LOGIN ================= */
 
-  const login = async (email, password) => {
-    const res = await authApi.login(email, password);
+  const login = async (email, password, role) => {
+    const res = await authApi.login(email, password, role);
 
     const { token } = res.data;
     const user = normalizeUserRole(res.data.user);
@@ -103,8 +103,8 @@ export const AuthProvider = ({ children }) => {
 
   /* ================= REGISTER ================= */
 
-  const register = async (email, password, username) => {
-    const res = await authApi.register(email, password, username);
+  const register = async (email, password, username, role, accessCode) => {
+    const res = await authApi.register(email, password, username, role, accessCode);
     return res.data;
   };
 

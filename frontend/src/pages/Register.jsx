@@ -7,10 +7,13 @@ const Register = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
+  const [role, setRole] = useState("viewer");
+  const [accessCode, setAccessCode] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
+  const isPrivilegedRole = role === "admin" || role === "analyst";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -19,12 +22,14 @@ const Register = () => {
     setLoading(true);
 
     try {
-      const response = await register(email, password, username);
+      const response = await register(email, password, username, role, accessCode);
       const message = response?.message || "Registration successful. You can sign in now.";
       setSuccess(message);
       setEmail("");
       setUsername("");
       setPassword("");
+      setRole("viewer");
+      setAccessCode("");
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed");
     } finally {
@@ -39,7 +44,7 @@ const Register = () => {
         <h1>ThreatLens</h1>
         <h2>Create Account</h2>
         <p className="auth-description">
-            Create a viewer account to monitor dashboards, alerts, logs, and reports with read-only access.
+          Create a ThreatLens account. Viewer is open for read-only access, while Analyst and Admin require a protected access code.
         </p>
 
         {error && <div className="error-message">{error}</div>}
@@ -71,6 +76,19 @@ const Register = () => {
           </div>
 
           <div className="form-group">
+            <label>Role</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              disabled={loading}
+            >
+              <option value="viewer">Viewer</option>
+              <option value="analyst">Analyst</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <div className="form-group">
             <label>Password</label>
             <input
               type="password"
@@ -81,6 +99,20 @@ const Register = () => {
               placeholder="Create a strong password"
             />
           </div>
+
+          {isPrivilegedRole && (
+            <div className="form-group">
+              <label>{role === "admin" ? "Admin Access Code" : "Analyst Access Code"}</label>
+              <input
+                type="password"
+                value={accessCode}
+                onChange={(e) => setAccessCode(e.target.value)}
+                required={isPrivilegedRole}
+                disabled={loading}
+                placeholder={`Enter the ${role} access code`}
+              />
+            </div>
+          )}
 
           <button type="submit" disabled={loading}>
             {loading ? "Creating account..." : "Register Securely"}
