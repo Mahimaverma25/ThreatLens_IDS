@@ -47,7 +47,13 @@ const getStatusClass = (status = "") => {
 };
 
 const getAlertTitle = (alert) =>
-  alert.type || alert.title || alert.attack_type || alert.event_type || "Unknown Alert";
+  alert.type ||
+  alert.title ||
+  alert.attack_type ||
+  alert.attackType ||
+  alert.event_type ||
+  alert.eventType ||
+  "Unknown Alert";
 
 const getAlertIp = (alert) =>
   alert.ip ||
@@ -56,18 +62,24 @@ const getAlertIp = (alert) =>
   alert.srcIp ||
   alert.sourceIp ||
   alert.remoteAddress ||
+  alert.metadata?.src_ip ||
+  alert.metadata?.source_ip ||
   "-";
 
-const getAlertRisk = (alert) =>
-  alert.risk_score ?? alert.riskScore ?? alert.score ?? 50;
+const getAlertRisk = (alert) => {
+  const risk = Number(alert.risk_score ?? alert.riskScore ?? alert.score ?? 50);
+  return Number.isNaN(risk) ? 50 : risk;
+};
 
 const getAlertConfidence = (alert) => {
-  const value = Number(alert.confidence ?? alert.ml_confidence ?? 0);
+  const value = Number(alert.confidence ?? alert.ml_confidence ?? alert.mlConfidence ?? 0);
+  if (Number.isNaN(value)) return 0;
   return value <= 1 ? Math.round(value * 100) : Math.round(value);
 };
 
 const Alerts = () => {
   const [alertList, setAlertList] = useState([]);
+  const [selectedAlert, setSelectedAlert] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -111,8 +123,6 @@ const Alerts = () => {
         setAlertList(Array.isArray(data) ? data : []);
         setTotal(pagination.total ?? data.length ?? 0);
       } catch (err) {
-        console.error("Alerts fetch error:", err);
-
         if (isMountedRef.current) {
           setError(
             err?.response?.data?.message ||
@@ -155,7 +165,7 @@ const Alerts = () => {
           : [...updated, incoming];
 
         return merged
-          .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+          .sort((a, b) => new Date(b.timestamp || b.createdAt || 0) - new Date(a.timestamp || a.createdAt || 0))
           .slice(0, LIMIT);
       });
 
@@ -225,7 +235,6 @@ const Alerts = () => {
 
     alertList.forEach((alert) => {
       const severity = normalizeSeverity(alert.severity);
-
       if (summary[severity] !== undefined) summary[severity] += 1;
 
       if (String(alert.status || "New").toLowerCase() === "investigating") {
@@ -233,7 +242,7 @@ const Alerts = () => {
       }
 
       confidenceTotal += getAlertConfidence(alert);
-      riskTotal += Number(getAlertRisk(alert) || 0);
+      riskTotal += getAlertRisk(alert);
     });
 
     summary.avgConfidence = Math.round(confidenceTotal / alertList.length);
@@ -282,7 +291,7 @@ const Alerts = () => {
       getAlertRisk(alert),
       alert.status || "New",
       alert.source || "ThreatLens",
-      formatTimestamp(alert.timestamp),
+      formatTimestamp(alert.timestamp || alert.createdAt),
       alert.description || alert.message || "-",
     ]);
 
@@ -313,288 +322,849 @@ const Alerts = () => {
 
   return (
     <MainLayout>
-      <section className="command-header">
-        <div>
-          <div className="command-eyebrow">ThreatLens / Detection Center</div>
-          <h1>Live Security Alerts</h1>
-          <p>
-            Monitor Snort events, HIDS signals, ML detections, rule-based alerts,
-            and real-time collector health from one clean alert center.
-          </p>
-        </div>
+      <style>{`
+        .alerts-page {
+          padding: 34px;
+          min-height: calc(100vh - 80px);
+          background: linear-gradient(135deg, #fff7ed 0%, #f8fbff 55%, #eef9f1 100%);
+        }
 
-        <div className="command-actions">
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => fetchAlerts(true)}
-            disabled={refreshing}
-          >
-            {refreshing ? "Refreshing..." : "Refresh Alerts"}
-          </button>
+        .alerts-shell {
+          max-width: 1240px;
+          margin: 0 auto;
+        }
 
-          <button
-            type="button"
-            className="primary-btn"
-            onClick={exportAlertsCSV}
-            disabled={!alertList.length}
-          >
-            Export CSV
-          </button>
-        </div>
-      </section>
+        .alerts-header {
+          display: flex;
+          justify-content: space-between;
+          gap: 22px;
+          align-items: flex-start;
+          background: rgba(255,255,255,.96);
+          border: 1px solid rgba(148,163,184,.2);
+          border-radius: 24px;
+          padding: 30px;
+          margin-bottom: 24px;
+          box-shadow: 0 18px 45px rgba(15,23,42,.08);
+        }
 
-      {error && <div className="error-message">{error}</div>}
+        .alerts-eyebrow {
+          font-size: 12px;
+          font-weight: 900;
+          color: #0ea5e9;
+          text-transform: uppercase;
+          letter-spacing: .12em;
+          margin-bottom: 8px;
+        }
 
-      <section className="metrics-grid">
-        <div className="metric-card">
-          <span>Live Channel</span>
-          <strong>{socketState.connectionStatus}</strong>
-          <small>{socketState.lastError || "Socket listener ready"}</small>
-        </div>
+        .alerts-header h1 {
+          margin: 0;
+          font-size: 34px;
+          color: #0f2742;
+        }
 
-        <div className="metric-card">
-          <span>Collector</span>
-          <strong>{collectorHeartbeat?.status || "Unknown"}</strong>
-          <small>{collectorHeartbeat?.agentType || "Waiting for heartbeat"}</small>
-        </div>
+        .alerts-header p {
+          margin: 10px 0 0;
+          color: #64748b;
+          line-height: 1.6;
+          max-width: 760px;
+        }
 
-        <div className="metric-card">
-          <span>Total Alerts</span>
-          <strong>{total}</strong>
-          <small>Current filtered result</small>
-        </div>
+        .alerts-actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
 
-        <div className="metric-card danger">
-          <span>Critical</span>
-          <strong>{alertSummary.critical}</strong>
-          <small>Immediate action required</small>
-        </div>
+        .primary-btn,
+        .secondary-btn {
+          border: 0;
+          border-radius: 14px;
+          padding: 13px 18px;
+          font-weight: 900;
+          cursor: pointer;
+          transition: .2s ease;
+          white-space: nowrap;
+        }
 
-        <div className="metric-card warning">
-          <span>High</span>
-          <strong>{alertSummary.high}</strong>
-          <small>Needs quick review</small>
-        </div>
+        .primary-btn {
+          background: linear-gradient(90deg, #0ea5e9, #2563eb);
+          color: #fff;
+          box-shadow: 0 12px 26px rgba(37,99,235,.22);
+        }
 
-        <div className="metric-card">
-          <span>Investigating</span>
-          <strong>{alertSummary.investigating}</strong>
-          <small>Active analyst workflow</small>
-        </div>
+        .secondary-btn {
+          background: #eef6ff;
+          color: #0f2742;
+          border: 1px solid #dbeafe;
+        }
 
-        <div className="metric-card">
-          <span>Avg Confidence</span>
-          <strong>{alertSummary.avgConfidence}%</strong>
-          <small>Rule / ML certainty</small>
-        </div>
+        .primary-btn:hover,
+        .secondary-btn:hover {
+          transform: translateY(-1px);
+        }
 
-        <div className="metric-card">
-          <span>Avg Risk</span>
-          <strong>{alertSummary.avgRisk}</strong>
-          <small>Calculated threat score</small>
-        </div>
-      </section>
+        .primary-btn:disabled,
+        .secondary-btn:disabled {
+          opacity: .6;
+          cursor: not-allowed;
+          transform: none;
+        }
 
-      <section className="controls alert-controls">
-        <input
-          className="search-input"
-          type="text"
-          placeholder="Search attack type, IP, source, keyword..."
-          value={filters.search}
-          onChange={(event) => updateFilter("search", event.target.value)}
-        />
+        .alerts-metrics {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 18px;
+          margin-bottom: 22px;
+        }
 
-        <select
-          value={filters.source}
-          onChange={(event) => updateFilter("source", event.target.value)}
-        >
-          <option value="">All sources</option>
-          <option value="snort">Live Snort</option>
-          <option value="ids-engine-ml">ML Engine</option>
-          <option value="rule-engine">Rule Engine</option>
-          <option value="hids-agent">HIDS Agent</option>
-          <option value="nids-collector">NIDS Collector</option>
-        </select>
+        .alert-metric-card {
+          background: rgba(255,255,255,.96);
+          border: 1px solid rgba(148,163,184,.2);
+          border-radius: 20px;
+          padding: 22px;
+          box-shadow: 0 14px 34px rgba(15,23,42,.07);
+        }
 
-        <select
-          value={filters.severity}
-          onChange={(event) => updateFilter("severity", event.target.value)}
-        >
-          <option value="">All severities</option>
-          <option value="Critical">Critical</option>
-          <option value="High">High</option>
-          <option value="Medium">Medium</option>
-          <option value="Low">Low</option>
-        </select>
+        .alert-metric-card span {
+          display: block;
+          font-size: 12px;
+          color: #64748b;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: .08em;
+          margin-bottom: 10px;
+        }
 
-        <select
-          value={filters.status}
-          onChange={(event) => updateFilter("status", event.target.value)}
-        >
-          <option value="">All statuses</option>
-          <option value="New">New</option>
-          <option value="Acknowledged">Acknowledged</option>
-          <option value="Investigating">Investigating</option>
-          <option value="Resolved">Resolved</option>
-          <option value="False Positive">False Positive</option>
-        </select>
+        .alert-metric-card strong {
+          display: block;
+          font-size: 28px;
+          color: #0f2742;
+          margin-bottom: 6px;
+        }
 
-        {hasActiveFilters && (
-          <button type="button" className="secondary-btn" onClick={resetFilters}>
-            Clear Filters
-          </button>
-        )}
-      </section>
+        .alert-metric-card small {
+          color: #64748b;
+        }
 
-      <section className="card alert-card">
-        <div className="card-header">
-          <div>
-            <h2>Alert Queue</h2>
-            <p>
-              Showing {alertList.length} of {total} alerts
-            </p>
-          </div>
+        .alert-metric-card.danger strong {
+          color: #dc2626;
+        }
 
-          <span
-            className={
-              socketState.connectionStatus === "connected"
-                ? "live-badge"
-                : "live-badge muted"
-            }
-          >
-            {socketState.connectionStatus === "connected"
-              ? "Live monitoring active"
-              : "Live channel inactive"}
-          </span>
-        </div>
+        .alert-metric-card.warning strong {
+          color: #ea580c;
+        }
 
-        {alertList.length > 0 ? (
-          <>
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Alert</th>
-                    <th>IP Address</th>
-                    <th>Severity</th>
-                    <th>Confidence</th>
-                    <th>Risk</th>
-                    <th>Status</th>
-                    <th>Source</th>
-                    <th>Timestamp</th>
-                  </tr>
-                </thead>
+        .alerts-controls {
+          display: grid;
+          grid-template-columns: 2fr 1fr 1fr 1fr auto;
+          gap: 14px;
+          background: rgba(255,255,255,.96);
+          border: 1px solid rgba(148,163,184,.2);
+          border-radius: 20px;
+          padding: 18px;
+          margin-bottom: 22px;
+          box-shadow: 0 14px 34px rgba(15,23,42,.06);
+        }
 
-                <tbody>
-                  {alertList.map((alert) => {
-                    const title = getAlertTitle(alert);
-                    const ip = getAlertIp(alert);
-                    const risk = getAlertRisk(alert);
-                    const confidence = getAlertConfidence(alert);
-                    const status = alert.status || "New";
+        .alerts-controls input,
+        .alerts-controls select {
+          width: 100%;
+          border: 1px solid #dbe3ef;
+          background: #f8fbff;
+          border-radius: 14px;
+          padding: 13px 14px;
+          outline: none;
+          color: #172033;
+          font-size: 14px;
+        }
 
-                    return (
-                      <tr key={alert._id}>
-                        <td>
-                          <Link to={`/alerts/${alert._id}`} className="alert-link">
-                            {title}
-                          </Link>
+        .alerts-controls input:focus,
+        .alerts-controls select:focus {
+          border-color: #0ea5e9;
+          box-shadow: 0 0 0 4px rgba(14,165,233,.12);
+          background: #fff;
+        }
 
-                          <small className="table-subtext">
-                            {alert.description ||
-                              alert.message ||
-                              "No additional alert description available."}
-                          </small>
-                        </td>
+        .alerts-card {
+          background: rgba(255,255,255,.96);
+          border: 1px solid rgba(148,163,184,.2);
+          border-radius: 24px;
+          box-shadow: 0 18px 45px rgba(15,23,42,.08);
+          overflow: hidden;
+        }
 
-                        <td className="ip-cell">{ip}</td>
+        .alerts-card-header {
+          padding: 24px 26px;
+          border-bottom: 1px solid #eef2f7;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 18px;
+        }
 
-                        <td>
-                          <span
-                            className={`severity ${getSeverityClass(alert.severity)}`}
-                          >
-                            {alert.severity || "Unknown"}
-                          </span>
-                        </td>
+        .alerts-card-header h2 {
+          margin: 0;
+          color: #172033;
+        }
 
-                        <td>
-                          <div className="confidence-cell">
-                            <span>{confidence}%</span>
-                            <div className="confidence-track">
-                              <div
-                                className="confidence-fill"
-                                style={{
-                                  width: `${Math.min(confidence, 100)}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        </td>
+        .alerts-card-header p {
+          margin: 6px 0 0;
+          color: #64748b;
+        }
 
-                        <td>
-                          <span className="risk-score">{risk}</span>
-                        </td>
+        .live-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 9px 14px;
+          border-radius: 999px;
+          color: #047857;
+          background: #ecfdf5;
+          border: 1px solid #bbf7d0;
+          font-size: 12px;
+          font-weight: 900;
+        }
 
-                        <td>
-                          <span className={`status-pill ${getStatusClass(status)}`}>
-                            {status}
-                          </span>
-                        </td>
+        .live-badge::before {
+          content: "";
+          width: 9px;
+          height: 9px;
+          border-radius: 99px;
+          background: #22c55e;
+        }
 
-                        <td>{alert.source || "ThreatLens"}</td>
+        .live-badge.muted {
+          color: #991b1b;
+          background: #fff1f2;
+          border-color: #fecdd3;
+        }
 
-                        <td>{formatTimestamp(alert.timestamp)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        .live-badge.muted::before {
+          background: #ef4444;
+        }
+
+        .alerts-table-wrapper {
+          overflow-x: auto;
+        }
+
+        .alerts-table {
+          width: 100%;
+          border-collapse: collapse;
+          min-width: 1050px;
+        }
+
+        .alerts-table th,
+        .alerts-table td {
+          text-align: left;
+          padding: 17px 18px;
+          border-bottom: 1px solid #eef2f7;
+          vertical-align: top;
+        }
+
+        .alerts-table th {
+          background: #f8fbff;
+          color: #475569;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: .08em;
+        }
+
+        .alerts-table td {
+          color: #172033;
+          font-size: 14px;
+        }
+
+        .alert-link {
+          display: inline-block;
+          color: #0f2742;
+          font-weight: 900;
+          text-decoration: none;
+          margin-bottom: 6px;
+        }
+
+        .alert-link:hover {
+          color: #2563eb;
+        }
+
+        .table-subtext {
+          display: block;
+          color: #64748b;
+          line-height: 1.5;
+          max-width: 360px;
+        }
+
+        .ip-cell {
+          font-family: Consolas, monospace;
+          font-weight: 800;
+        }
+
+        .severity,
+        .status-pill {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 7px 11px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 900;
+          white-space: nowrap;
+        }
+
+        .severity-critical {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+
+        .severity-high {
+          background: #ffedd5;
+          color: #9a3412;
+        }
+
+        .severity-medium {
+          background: #fef9c3;
+          color: #854d0e;
+        }
+
+        .severity-low {
+          background: #dcfce7;
+          color: #166534;
+        }
+
+        .severity-unknown {
+          background: #e2e8f0;
+          color: #475569;
+        }
+
+        .status-new {
+          background: #eff6ff;
+          color: #1d4ed8;
+        }
+
+        .status-acknowledged {
+          background: #f5f3ff;
+          color: #6d28d9;
+        }
+
+        .status-investigating {
+          background: #fff7ed;
+          color: #c2410c;
+        }
+
+        .status-resolved {
+          background: #ecfdf5;
+          color: #047857;
+        }
+
+        .status-false {
+          background: #f1f5f9;
+          color: #475569;
+        }
+
+        .confidence-cell {
+          min-width: 120px;
+        }
+
+        .confidence-cell span {
+          font-weight: 900;
+          color: #0f2742;
+        }
+
+        .confidence-track {
+          height: 8px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          overflow: hidden;
+          margin-top: 7px;
+        }
+
+        .confidence-fill {
+          height: 100%;
+          border-radius: 999px;
+          background: linear-gradient(90deg, #0ea5e9, #2563eb);
+        }
+
+        .risk-score {
+          font-weight: 900;
+          color: #dc2626;
+        }
+
+        .pagination {
+          padding: 20px 26px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+
+        .pagination button {
+          border: 1px solid #dbeafe;
+          background: #eef6ff;
+          color: #0f2742;
+          border-radius: 12px;
+          padding: 11px 16px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .pagination button:disabled {
+          opacity: .45;
+          cursor: not-allowed;
+        }
+
+        .empty-state {
+          text-align: center;
+          padding: 60px 24px;
+        }
+
+        .empty-state h3 {
+          margin: 0 0 8px;
+          color: #172033;
+        }
+
+        .empty-state p {
+          margin: 0 auto 20px;
+          color: #64748b;
+          max-width: 520px;
+          line-height: 1.6;
+        }
+
+        .error-message {
+          background: #fff1f2;
+          color: #be123c;
+          border: 1px solid #fecdd3;
+          border-radius: 14px;
+          padding: 14px 16px;
+          margin-bottom: 18px;
+          font-weight: 800;
+        }
+
+        .alert-details-panel {
+          margin-top: 22px;
+          background: rgba(255,255,255,.96);
+          border: 1px solid rgba(148,163,184,.2);
+          border-radius: 22px;
+          padding: 24px;
+          box-shadow: 0 14px 34px rgba(15,23,42,.07);
+        }
+
+        .alert-details-panel h3 {
+          margin: 0 0 12px;
+          color: #172033;
+        }
+
+        .details-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        .detail-box {
+          background: #f8fbff;
+          border: 1px solid #e2e8f0;
+          border-radius: 16px;
+          padding: 15px;
+        }
+
+        .detail-box span {
+          display: block;
+          color: #64748b;
+          font-size: 12px;
+          font-weight: 900;
+          margin-bottom: 6px;
+        }
+
+        .detail-box strong {
+          color: #0f2742;
+          overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 1100px) {
+          .alerts-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .alerts-controls {
+            grid-template-columns: 1fr 1fr;
+          }
+
+          .details-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 720px) {
+          .alerts-page {
+            padding: 16px;
+          }
+
+          .alerts-header {
+            flex-direction: column;
+            padding: 24px;
+          }
+
+          .alerts-header h1 {
+            font-size: 28px;
+          }
+
+          .alerts-actions,
+          .primary-btn,
+          .secondary-btn {
+            width: 100%;
+          }
+
+          .alerts-metrics,
+          .alerts-controls,
+          .details-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .alerts-card-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+        }
+      `}</style>
+
+      <div className="alerts-page">
+        <div className="alerts-shell">
+          <section className="alerts-header">
+            <div>
+              <div className="alerts-eyebrow">ThreatLens / Detection Center</div>
+              <h1>Live Security Alerts</h1>
+              <p>
+                Monitor Snort events, HIDS signals, ML detections, rule-based alerts,
+                and real-time collector health from one professional alert center.
+              </p>
             </div>
 
-            <div className="pagination">
+            <div className="alerts-actions">
               <button
                 type="button"
-                onClick={() => setPage((current) => Math.max(current - 1, 1))}
-                disabled={page === 1}
+                className="secondary-btn"
+                onClick={() => fetchAlerts(true)}
+                disabled={refreshing}
               >
-                Previous
+                {refreshing ? "Refreshing..." : "Refresh Alerts"}
               </button>
 
-              <span>
-                Page {page} of {totalPages}
-              </span>
-
               <button
                 type="button"
-                onClick={() =>
-                  setPage((current) => Math.min(current + 1, totalPages))
-                }
-                disabled={page >= totalPages}
+                className="primary-btn"
+                onClick={exportAlertsCSV}
+                disabled={!alertList.length}
               >
-                Next
+                Export CSV
               </button>
             </div>
-          </>
-        ) : (
-          <div className="empty-state">
-            <h3>No alerts detected yet</h3>
-            <p>
-              Once Snort, HIDS agent, rule engine, or ML service sends suspicious
-              activity, alerts will appear here automatically.
-            </p>
+          </section>
 
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={() => fetchAlerts(true)}
-              disabled={refreshing}
+          {error && <div className="error-message">{error}</div>}
+
+          <section className="alerts-metrics">
+            <div className="alert-metric-card">
+              <span>Live Channel</span>
+              <strong>{socketState.connectionStatus}</strong>
+              <small>{socketState.lastError || "Socket listener ready"}</small>
+            </div>
+
+            <div className="alert-metric-card">
+              <span>Collector</span>
+              <strong>{collectorHeartbeat?.status || "Unknown"}</strong>
+              <small>{collectorHeartbeat?.agentType || "Waiting for heartbeat"}</small>
+            </div>
+
+            <div className="alert-metric-card">
+              <span>Total Alerts</span>
+              <strong>{total}</strong>
+              <small>Current filtered result</small>
+            </div>
+
+            <div className="alert-metric-card danger">
+              <span>Critical</span>
+              <strong>{alertSummary.critical}</strong>
+              <small>Immediate action required</small>
+            </div>
+
+            <div className="alert-metric-card warning">
+              <span>High</span>
+              <strong>{alertSummary.high}</strong>
+              <small>Needs quick review</small>
+            </div>
+
+            <div className="alert-metric-card">
+              <span>Investigating</span>
+              <strong>{alertSummary.investigating}</strong>
+              <small>Active analyst workflow</small>
+            </div>
+
+            <div className="alert-metric-card">
+              <span>Avg Confidence</span>
+              <strong>{alertSummary.avgConfidence}%</strong>
+              <small>Rule / ML certainty</small>
+            </div>
+
+            <div className="alert-metric-card">
+              <span>Avg Risk</span>
+              <strong>{alertSummary.avgRisk}</strong>
+              <small>Calculated threat score</small>
+            </div>
+          </section>
+
+          <section className="alerts-controls">
+            <input
+              type="text"
+              placeholder="Search attack type, IP, source, keyword..."
+              value={filters.search}
+              onChange={(event) => updateFilter("search", event.target.value)}
+            />
+
+            <select
+              value={filters.source}
+              onChange={(event) => updateFilter("source", event.target.value)}
             >
-              Check Again
-            </button>
-          </div>
-        )}
-      </section>
+              <option value="">All sources</option>
+              <option value="snort">Live Snort</option>
+              <option value="ids-engine-ml">ML Engine</option>
+              <option value="rule-engine">Rule Engine</option>
+              <option value="hids-agent">HIDS Agent</option>
+              <option value="nids-collector">NIDS Collector</option>
+            </select>
+
+            <select
+              value={filters.severity}
+              onChange={(event) => updateFilter("severity", event.target.value)}
+            >
+              <option value="">All severities</option>
+              <option value="Critical">Critical</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+
+            <select
+              value={filters.status}
+              onChange={(event) => updateFilter("status", event.target.value)}
+            >
+              <option value="">All statuses</option>
+              <option value="New">New</option>
+              <option value="Acknowledged">Acknowledged</option>
+              <option value="Investigating">Investigating</option>
+              <option value="Resolved">Resolved</option>
+              <option value="False Positive">False Positive</option>
+            </select>
+
+            {hasActiveFilters && (
+              <button type="button" className="secondary-btn" onClick={resetFilters}>
+                Clear Filters
+              </button>
+            )}
+          </section>
+
+          <section className="alerts-card">
+            <div className="alerts-card-header">
+              <div>
+                <h2>Alert Queue</h2>
+                <p>
+                  Showing {alertList.length} of {total} alerts
+                </p>
+              </div>
+
+              <span
+                className={
+                  socketState.connectionStatus === "connected"
+                    ? "live-badge"
+                    : "live-badge muted"
+                }
+              >
+                {socketState.connectionStatus === "connected"
+                  ? "Live monitoring active"
+                  : "Live channel inactive"}
+              </span>
+            </div>
+
+            {alertList.length > 0 ? (
+              <>
+                <div className="alerts-table-wrapper">
+                  <table className="alerts-table">
+                    <thead>
+                      <tr>
+                        <th>Alert</th>
+                        <th>IP Address</th>
+                        <th>Severity</th>
+                        <th>Confidence</th>
+                        <th>Risk</th>
+                        <th>Status</th>
+                        <th>Source</th>
+                        <th>Timestamp</th>
+                        <th>Inspect</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {alertList.map((alert) => {
+                        const title = getAlertTitle(alert);
+                        const ip = getAlertIp(alert);
+                        const risk = getAlertRisk(alert);
+                        const confidence = getAlertConfidence(alert);
+                        const status = alert.status || "New";
+
+                        return (
+                          <tr key={alert._id}>
+                            <td>
+                              <Link to={`/alerts/${alert._id}`} className="alert-link">
+                                {title}
+                              </Link>
+
+                              <small className="table-subtext">
+                                {alert.description ||
+                                  alert.message ||
+                                  "No additional alert description available."}
+                              </small>
+                            </td>
+
+                            <td className="ip-cell">{ip}</td>
+
+                            <td>
+                              <span className={`severity ${getSeverityClass(alert.severity)}`}>
+                                {alert.severity || "Unknown"}
+                              </span>
+                            </td>
+
+                            <td>
+                              <div className="confidence-cell">
+                                <span>{confidence}%</span>
+                                <div className="confidence-track">
+                                  <div
+                                    className="confidence-fill"
+                                    style={{ width: `${Math.min(confidence, 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </td>
+
+                            <td>
+                              <span className="risk-score">{risk}</span>
+                            </td>
+
+                            <td>
+                              <span className={`status-pill ${getStatusClass(status)}`}>
+                                {status}
+                              </span>
+                            </td>
+
+                            <td>{alert.source || "ThreatLens"}</td>
+
+                            <td>{formatTimestamp(alert.timestamp || alert.createdAt)}</td>
+
+                            <td>
+                              <button
+                                type="button"
+                                className="secondary-btn"
+                                onClick={() => setSelectedAlert(alert)}
+                              >
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="pagination">
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => Math.max(current - 1, 1))}
+                    disabled={page === 1}
+                  >
+                    Previous
+                  </button>
+
+                  <span>
+                    Page {page} of {totalPages}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => Math.min(current + 1, totalPages))}
+                    disabled={page >= totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="empty-state">
+                <h3>No alerts detected yet</h3>
+                <p>
+                  Once Snort, HIDS agent, rule engine, or ML service sends suspicious
+                  activity, alerts will appear here automatically.
+                </p>
+
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => fetchAlerts(true)}
+                  disabled={refreshing}
+                >
+                  Check Again
+                </button>
+              </div>
+            )}
+          </section>
+
+          {selectedAlert && (
+            <section className="alert-details-panel">
+              <h3>Selected Alert Details</h3>
+
+              <div className="details-grid">
+                <div className="detail-box">
+                  <span>Attack Type</span>
+                  <strong>{getAlertTitle(selectedAlert)}</strong>
+                </div>
+
+                <div className="detail-box">
+                  <span>Source IP</span>
+                  <strong>{getAlertIp(selectedAlert)}</strong>
+                </div>
+
+                <div className="detail-box">
+                  <span>Severity</span>
+                  <strong>{selectedAlert.severity || "Unknown"}</strong>
+                </div>
+
+                <div className="detail-box">
+                  <span>Status</span>
+                  <strong>{selectedAlert.status || "New"}</strong>
+                </div>
+
+                <div className="detail-box">
+                  <span>Confidence</span>
+                  <strong>{getAlertConfidence(selectedAlert)}%</strong>
+                </div>
+
+                <div className="detail-box">
+                  <span>Risk Score</span>
+                  <strong>{getAlertRisk(selectedAlert)}</strong>
+                </div>
+
+                <div className="detail-box">
+                  <span>Source</span>
+                  <strong>{selectedAlert.source || "ThreatLens"}</strong>
+                </div>
+
+                <div className="detail-box">
+                  <span>Timestamp</span>
+                  <strong>{formatTimestamp(selectedAlert.timestamp || selectedAlert.createdAt)}</strong>
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
+      </div>
     </MainLayout>
   );
 };

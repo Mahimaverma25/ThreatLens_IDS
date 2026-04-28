@@ -87,3 +87,35 @@ ThreatLens now runs as a hybrid IDS backend with:
 5. Alerts are created or updated.
 6. Correlation rolls alerts into incidents.
 7. Dashboard clients receive live updates over sockets.
+
+# folder structure
+agent/
+│
+├── collectors/                     ⭐ DATA COLLECTION LAYER
+│   ├── auth.collector.js
+│   ├── filewatch.collector.js
+│   ├── heartbeat.collector.js
+│   ├── process.collector.js
+│   ├── system.collector.js
+│   ├── windows-event.collector.js
+│   └── snort.collector.js        ⭐ (rename from snort-parsers.js)
+│
+├── services/                      ⭐ COMMUNICATION LAYER
+│   └── apiClient.js
+│
+├── utils/                         ⭐ SUPPORT LAYER
+│   ├── eventNormalizer.js
+│   ├── ingest-signature.js
+│   ├── logger.js
+│   ├── osInfo.js
+│   └── spoolStore.js
+│
+├── config.js                      ⭐ CONFIG MANAGEMENT
+├── agent.js                       // main HIDS host agent
+├── realtime-agent.js              // Snort/NIDS collector     
+├── snort-parsers.js                // Snort log parser
+├── package.json
+├── .env
+└── README.md
+
+```

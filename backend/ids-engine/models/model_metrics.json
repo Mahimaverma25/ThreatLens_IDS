@@ -1,0 +1,40 @@
+{
+  "last_trained": "2026-04-28T10:30:00Z",
+  "models": {
+    "random_forest": {
+      "accuracy": 0.94,
+      "precision": 0.92,
+      "recall": 0.93,
+      "f1_score": 0.925,
+      "samples": 2200,
+      "type": "classification"
+    },
+    "one_class_svm": {
+      "threshold": 0.92,
+      "score_mean": 0.48,
+      "score_stddev": 0.12,
+      "type": "anomaly"
+    },
+    "isolation_forest": {
+      "threshold": 0.08,
+      "score_mean": 0.35,
+      "score_stddev": 0.09,
+      "type": "anomaly"
+    }
+  },
+  "feature_names": [
+    "protocol_code",
+    "destination_port",
+    "request_rate",
+    "packets",
+    "bytes",
+    "failed_attempts",
+    "flow_count",
+    "unique_ports",
+    "dns_queries",
+    "smb_writes",
+    "duration",
+    "snort_priority",
+    "is_snort"
+  ]
+}

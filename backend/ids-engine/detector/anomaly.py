@@ -50,6 +50,8 @@ PROTOCOL_CODES = {
 
 def _as_float(value, fallback: float = 0.0) -> float:
     try:
+        if value is None or value == "":
+            return fallback
         return float(value)
     except (TypeError, ValueError):
         return fallback
@@ -84,9 +86,19 @@ def _infer_protocol_from_port(port: float) -> int:
 
 
 def normalize_event(event: Dict) -> Dict:
+    event = event or {}
+
     protocol = event.get("protocol") or event.get("app_protocol") or ""
-    destination_port = _as_float(event.get("destination_port", event.get("port", 0)))
-    protocol_code = _as_float(event.get("protocol_code", _protocol_code(protocol)))
+    destination_port = _as_float(
+        event.get(
+            "destination_port",
+            event.get("dest_port", event.get("port", 0)),
+        )
+    )
+
+    protocol_code = _as_float(
+        event.get("protocol_code", _protocol_code(protocol))
+    )
 
     if protocol_code == 0 and destination_port:
         protocol_code = float(_infer_protocol_from_port(destination_port))
@@ -103,88 +115,75 @@ def normalize_event(event: Dict) -> Dict:
         "dns_queries": _as_float(event.get("dns_queries", event.get("dnsQueries", 0))),
         "smb_writes": _as_float(event.get("smb_writes", event.get("smbWrites", 0))),
         "duration": _as_float(event.get("duration")),
-        "snort_priority": _as_float(event.get("snort_priority", 0)),
-        "is_snort": _as_float(event.get("is_snort", 0)),
+        "snort_priority": _as_float(event.get("snort_priority", event.get("priority", 0))),
+        "is_snort": _as_float(event.get("is_snort", 1 if event.get("signature_id") or event.get("sid") else 0)),
     }
 
 
 def _feature_matrix(normalized_event: Dict) -> np.ndarray:
-    return np.array([[normalized_event.get(name, 0.0) for name in FEATURE_NAMES]], dtype=float)
+    return np.array(
+        [[normalized_event.get(name, 0.0) for name in FEATURE_NAMES]],
+        dtype=float,
+    )
 
 
-def _load_artifact(model_path: str, default_task: str):
+def _load_artifact(model_path: str, default_task: str) -> Dict:
+    default_state = {
+        "loaded": False,
+        "algorithm": None,
+        "task": default_task,
+        "using_fallback": True,
+        "threshold": 0.65,
+        "model": None,
+        "feature_names": FEATURE_NAMES,
+        "trained_at": None,
+        "error": None,
+        "path": model_path,
+        "training_summary": None,
+        "class_names": [],
+        "benign_indexes": [],
+    }
+
     if not config.ENABLE_ANOMALY_DETECTION:
-        return {
-            "loaded": False,
-            "algorithm": None,
-            "task": default_task,
-            "using_fallback": True,
-            "threshold": 0.65,
-            "model": None,
-            "feature_names": FEATURE_NAMES,
-            "trained_at": None,
-            "error": "Anomaly detection disabled by configuration",
-            "path": model_path,
-            "training_summary": None,
-        }
+        default_state["error"] = "Anomaly detection disabled by configuration"
+        return default_state
 
     if not os.path.exists(model_path):
-        return {
-            "loaded": False,
-            "algorithm": None,
-            "task": default_task,
-            "using_fallback": True,
-            "threshold": 0.65,
-            "model": None,
-            "feature_names": FEATURE_NAMES,
-            "trained_at": None,
-            "error": f"Model file missing: {model_path}",
-            "path": model_path,
-            "training_summary": None,
-        }
+        default_state["error"] = f"Model file missing: {model_path}"
+        return default_state
 
     try:
         artifact = joblib.load(model_path)
-        model = artifact.get("model") if isinstance(artifact, dict) else artifact
-        feature_names = artifact.get("feature_names", FEATURE_NAMES) if isinstance(artifact, dict) else FEATURE_NAMES
-        threshold = float(artifact.get("threshold", 0.65)) if isinstance(artifact, dict) else 0.65
-        algorithm = artifact.get("algorithm", type(model).__name__) if isinstance(artifact, dict) else type(model).__name__
-        trained_at = artifact.get("trained_at") if isinstance(artifact, dict) else None
-        task = artifact.get("task", default_task) if isinstance(artifact, dict) else default_task
-        training_summary = artifact.get("training_summary") if isinstance(artifact, dict) else None
+
+        if isinstance(artifact, dict):
+            model = artifact.get("model")
+            return {
+                **default_state,
+                "loaded": model is not None,
+                "algorithm": artifact.get("algorithm", type(model).__name__ if model else None),
+                "task": artifact.get("task", default_task),
+                "using_fallback": False,
+                "threshold": float(artifact.get("threshold", 0.65)),
+                "model": model,
+                "feature_names": artifact.get("feature_names", FEATURE_NAMES),
+                "trained_at": artifact.get("trained_at"),
+                "training_summary": artifact.get("training_summary"),
+                "class_names": artifact.get("class_names", []),
+                "benign_indexes": artifact.get("benign_indexes", []),
+            }
 
         return {
+            **default_state,
             "loaded": True,
-            "algorithm": algorithm,
-            "task": task,
+            "algorithm": type(artifact).__name__,
             "using_fallback": False,
-            "threshold": threshold,
-            "model": model,
-            "feature_names": feature_names,
-            "trained_at": trained_at,
-            "error": None,
-            "path": model_path,
-            "training_summary": training_summary,
-            "class_names": artifact.get("class_names", []) if isinstance(artifact, dict) else [],
-            "benign_indexes": artifact.get("benign_indexes", []) if isinstance(artifact, dict) else [],
+            "model": artifact,
         }
-    except Exception as exc:  # pragma: no cover
-        logger.error("Failed to load model from %s: %s", model_path, exc)
-        return {
-            "loaded": False,
-            "algorithm": None,
-            "task": default_task,
-            "using_fallback": True,
-            "threshold": 0.65,
-            "model": None,
-            "feature_names": FEATURE_NAMES,
-            "trained_at": None,
-            "error": str(exc),
-            "path": model_path,
-            "training_summary": None,
-            "class_names": [],
-            "benign_indexes": [],
-        }
+
+    except Exception as exc:
+        logger.exception("Failed to load model from %s", model_path)
+        default_state["error"] = str(exc)
+        return default_state
 
 
 RF_STATE = _load_artifact(config.RF_MODEL_PATH, "classification")
@@ -193,15 +192,26 @@ LEGACY_STATE = _load_artifact(config.MODEL_PATH, "anomaly")
 
 
 def get_model_status() -> Dict:
-    hybrid_loaded = RF_STATE["loaded"] or SVM_STATE["loaded"] or LEGACY_STATE["loaded"]
+    states = (RF_STATE, SVM_STATE, LEGACY_STATE)
+
+    hybrid_loaded = any(state["loaded"] for state in states)
+
     algorithms = [
         state["algorithm"]
-        for state in (RF_STATE, SVM_STATE, LEGACY_STATE)
+        for state in states
         if state["loaded"] and state["algorithm"]
     ]
 
     trained_values = [
-        state["trained_at"] for state in (RF_STATE, SVM_STATE, LEGACY_STATE) if state["trained_at"]
+        state["trained_at"]
+        for state in states
+        if state.get("trained_at")
+    ]
+
+    loaded_thresholds = [
+        state["threshold"]
+        for state in states
+        if state["loaded"]
     ]
 
     return {
@@ -209,14 +219,7 @@ def get_model_status() -> Dict:
         "algorithm": " + ".join(algorithms) if algorithms else "heuristic-fallback",
         "task": "hybrid",
         "using_fallback": not hybrid_loaded,
-        "threshold": min(
-            [
-                state["threshold"]
-                for state in (RF_STATE, SVM_STATE, LEGACY_STATE)
-                if state["loaded"]
-            ]
-            or [0.65]
-        ),
+        "threshold": min(loaded_thresholds or [0.65]),
         "trained_at": max(trained_values) if trained_values else None,
         "feature_names": FEATURE_NAMES,
         "rf_model": {
@@ -263,16 +266,16 @@ def _fallback_score(normalized_event: Dict) -> Tuple[float, str]:
     high_snort_priority = 1.0 if 0 < normalized_event["snort_priority"] <= 2 else 0.0
 
     score = (
-        (request_rate * 0.18)
-        + (packets * 0.14)
-        + (bytes_sent * 0.14)
-        + (failed_attempts * 0.14)
-        + (flow_count * 0.1)
-        + (unique_ports * 0.1)
-        + (dns_queries * 0.08)
-        + (smb_writes * 0.08)
-        + (snort_weight * 0.08)
-        + (high_snort_priority * 0.06)
+        request_rate * 0.18
+        + packets * 0.14
+        + bytes_sent * 0.14
+        + failed_attempts * 0.14
+        + flow_count * 0.10
+        + unique_ports * 0.10
+        + dns_queries * 0.08
+        + smb_writes * 0.08
+        + snort_weight * 0.08
+        + high_snort_priority * 0.06
     )
 
     score = round(min(max(score, 0.0), 1.0), 4)
@@ -281,10 +284,12 @@ def _fallback_score(normalized_event: Dict) -> Tuple[float, str]:
         return score, "High-volume network behavior exceeded fallback thresholds"
     if score >= 0.65:
         return score, "Multiple elevated traffic indicators triggered the fallback detector"
+
     return score, "Traffic stayed within the fallback baseline"
 
 
 def _probability_from_distance(value: float) -> float:
+    value = max(min(value, 60), -60)
     return 1.0 / (1.0 + math.exp(-value))
 
 
@@ -292,67 +297,114 @@ def _rf_score(normalized_event: Dict) -> Tuple[float, str, str]:
     if not RF_STATE["loaded"] or RF_STATE["model"] is None:
         return 0.0, "RandomForest model unavailable", ""
 
-    matrix = _feature_matrix(normalized_event)
-    probabilities = RF_STATE["model"].predict_proba(matrix)[0]
-    class_names = RF_STATE.get("class_names") or []
-    benign_indexes = set(RF_STATE.get("benign_indexes") or [])
-    predicted_index = int(np.argmax(probabilities))
-    predicted_class = (
-        class_names[predicted_index] if predicted_index < len(class_names) else str(predicted_index)
-    )
+    try:
+        matrix = _feature_matrix(normalized_event)
+        probabilities = RF_STATE["model"].predict_proba(matrix)[0]
 
-    if benign_indexes:
-        benign_probability = float(sum(probabilities[index] for index in benign_indexes if index < len(probabilities)))
-        score = max(0.0, min(1.0, 1.0 - benign_probability))
-    else:
-        score = float(np.max(probabilities))
+        class_names = RF_STATE.get("class_names") or []
+        benign_indexes = set(RF_STATE.get("benign_indexes") or [])
 
-    if score >= RF_STATE["threshold"]:
+        predicted_index = int(np.argmax(probabilities))
+        predicted_class = (
+            class_names[predicted_index]
+            if predicted_index < len(class_names)
+            else str(predicted_index)
+        )
+
+        if benign_indexes:
+            benign_probability = float(
+                sum(
+                    probabilities[index]
+                    for index in benign_indexes
+                    if index < len(probabilities)
+                )
+            )
+            score = max(0.0, min(1.0, 1.0 - benign_probability))
+        else:
+            score = float(np.max(probabilities))
+
+        if score >= RF_STATE["threshold"]:
+            return (
+                round(score, 4),
+                f"RandomForest predicted {predicted_class} and crossed the malicious threshold",
+                predicted_class,
+            )
+
         return (
-            score,
-            f"RandomForest predicted {predicted_class} and crossed the malicious threshold",
+            round(score, 4),
+            f"RandomForest predicted {predicted_class} within the learned baseline",
             predicted_class,
         )
-    return score, f"RandomForest predicted {predicted_class} within the learned baseline", predicted_class
+
+    except Exception as exc:
+        logger.exception("RandomForest scoring failed")
+        return 0.0, f"RandomForest scoring failed: {exc}", ""
 
 
 def _svm_score(normalized_event: Dict) -> Tuple[float, str]:
     if not SVM_STATE["loaded"] or SVM_STATE["model"] is None:
         return 0.0, "SVM model unavailable"
 
-    matrix = _feature_matrix(normalized_event)
-    decision_value = -float(SVM_STATE["model"].decision_function(matrix)[0])
-    score = round(_probability_from_distance(decision_value), 4)
-    if score >= SVM_STATE["threshold"]:
-        return score, "SVM anomaly score crossed the suspicious threshold"
-    return score, "SVM anomaly score stayed within the learned boundary"
+    try:
+        matrix = _feature_matrix(normalized_event)
+        decision_value = -float(SVM_STATE["model"].decision_function(matrix)[0])
+        score = round(_probability_from_distance(decision_value), 4)
+
+        if score >= SVM_STATE["threshold"]:
+            return score, "SVM anomaly score crossed the suspicious threshold"
+
+        return score, "SVM anomaly score stayed within the learned boundary"
+
+    except Exception as exc:
+        logger.exception("SVM scoring failed")
+        return 0.0, f"SVM scoring failed: {exc}"
 
 
 def _legacy_score(normalized_event: Dict) -> Tuple[float, str]:
     if not LEGACY_STATE["loaded"] or LEGACY_STATE["model"] is None:
         return 0.0, "Legacy anomaly model unavailable"
 
-    matrix = _feature_matrix(normalized_event)
-    score = -float(LEGACY_STATE["model"].decision_function(matrix)[0])
-    score = round(min(max(_probability_from_distance(score), 0.0), 1.0), 4)
-    if score >= LEGACY_STATE["threshold"]:
-        return score, "Legacy anomaly model flagged the event"
-    return score, "Legacy anomaly model stayed within baseline"
+    try:
+        matrix = _feature_matrix(normalized_event)
+        score = -float(LEGACY_STATE["model"].decision_function(matrix)[0])
+        score = round(min(max(_probability_from_distance(score), 0.0), 1.0), 4)
+
+        if score >= LEGACY_STATE["threshold"]:
+            return score, "Legacy anomaly model flagged the event"
+
+        return score, "Legacy anomaly model stayed within baseline"
+
+    except Exception as exc:
+        logger.exception("Legacy anomaly scoring failed")
+        return 0.0, f"Legacy anomaly scoring failed: {exc}"
 
 
 def _build_severity(score: float, threshold: float) -> Tuple[bool, str, float, int]:
     if score < threshold:
         confidence = max(0.2, min(0.7, threshold - score + 0.2))
-        return False, "Low", round(confidence, 4), int(min(45, confidence * 60))
+        return False, "low", round(confidence, 4), int(min(45, confidence * 60))
 
     distance = max(score - threshold, 0.0)
     confidence = round(min(0.98, 0.7 + distance * 1.4), 4)
 
     if score >= threshold + 0.25:
-        return True, "Critical", confidence, min(96, int(80 + distance * 100))
+        return True, "critical", confidence, min(96, int(80 + distance * 100))
     if score >= threshold + 0.15:
-        return True, "High", confidence, min(88, int(72 + distance * 90))
-    return True, "Medium", confidence, min(75, int(60 + distance * 80))
+        return True, "high", confidence, min(88, int(72 + distance * 90))
+
+    return True, "medium", confidence, min(75, int(60 + distance * 80))
+
+
+def _attack_type_from_rf_class(rf_class: str, is_anomaly: bool) -> str:
+    rf_class = str(rf_class or "").lower().strip()
+
+    if rf_class and rf_class not in {"benign", "normal", "0"}:
+        return rf_class
+
+    if is_anomaly:
+        return "ml_anomaly"
+
+    return "benign"
 
 
 def analyze_event(event: Dict) -> Dict:
@@ -362,30 +414,44 @@ def analyze_event(event: Dict) -> Dict:
     svm_score, svm_reason = _svm_score(normalized)
     legacy_score, legacy_reason = _legacy_score(normalized)
 
-    if RF_STATE["loaded"] or SVM_STATE["loaded"] or LEGACY_STATE["loaded"]:
-      combined_score = max(rf_score, svm_score, legacy_score)
-      threshold = min(
-          [
-              state["threshold"]
-              for state in (RF_STATE, SVM_STATE, LEGACY_STATE)
-              if state["loaded"]
-          ]
-          or [0.55]
-      )
-      reason = " | ".join(
-          [message for message in [rf_reason, svm_reason, legacy_reason] if "unavailable" not in message.lower()]
-      ) or "Hybrid models evaluated the event"
-    else:
-      combined_score, reason = _fallback_score(normalized)
-      threshold = 0.65
+    models_loaded = RF_STATE["loaded"] or SVM_STATE["loaded"] or LEGACY_STATE["loaded"]
 
-    is_anomaly, severity, confidence, risk_score = _build_severity(combined_score, threshold)
+    if models_loaded:
+        combined_score = max(rf_score, svm_score, legacy_score)
+
+        threshold = min(
+            [
+                state["threshold"]
+                for state in (RF_STATE, SVM_STATE, LEGACY_STATE)
+                if state["loaded"]
+            ]
+            or [0.55]
+        )
+
+        reason = " | ".join(
+            message
+            for message in [rf_reason, svm_reason, legacy_reason]
+            if "unavailable" not in message.lower()
+        ) or "Hybrid models evaluated the event"
+    else:
+        combined_score, reason = _fallback_score(normalized)
+        threshold = 0.65
+
+    is_anomaly, severity, confidence, risk_score = _build_severity(
+        combined_score,
+        threshold,
+    )
+
+    attack_type = _attack_type_from_rf_class(rf_class, is_anomaly)
 
     return {
         "algorithm": get_model_status()["algorithm"],
         "task": "hybrid",
-        "using_fallback": not (RF_STATE["loaded"] or SVM_STATE["loaded"] or LEGACY_STATE["loaded"]),
+        "using_fallback": not models_loaded,
         "is_anomaly": is_anomaly,
+        "is_attack": is_anomaly,
+        "attack_type": attack_type,
+        "prediction": attack_type,
         "score": round(combined_score, 4),
         "threshold": threshold,
         "severity": severity,
@@ -417,11 +483,40 @@ def analyze_event(event: Dict) -> Dict:
     }
 
 
+def detect_anomaly(event: Dict) -> Dict:
+    """
+    Pipeline-compatible ML detector used by detector/pipeline.py.
+    """
+
+    analysis = analyze_event(event or {})
+
+    return {
+        "engine": "ml_anomaly",
+        "is_attack": bool(analysis.get("is_attack", False)),
+        "is_anomaly": bool(analysis.get("is_anomaly", False)),
+        "attack_type": analysis.get("attack_type", "benign"),
+        "prediction": analysis.get("prediction", "benign"),
+        "severity": analysis.get("severity", "low"),
+        "confidence": float(analysis.get("confidence", 0.0)),
+        "score": float(analysis.get("score", 0.0)),
+        "risk_score": int(analysis.get("risk_score", 0)),
+        "threshold": float(analysis.get("threshold", 0.0)),
+        "detection_type": "machine_learning",
+        "algorithm": analysis.get("algorithm", "hybrid"),
+        "using_fallback": bool(analysis.get("using_fallback", False)),
+        "reason": analysis.get("reason", "ML anomaly analysis completed"),
+        "features": analysis.get("features", {}),
+        "submodels": analysis.get("submodels", {}),
+        "raw": analysis,
+    }
+
+
 def analyze_events(events: List[Dict]) -> List[Dict]:
     return [
         {
             "event_id": event.get("event_id"),
             "analysis": analyze_event(event),
+            "detection": detect_anomaly(event),
         }
         for event in events
     ]
