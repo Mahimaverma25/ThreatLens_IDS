@@ -908,6 +908,57 @@ const evaluateIdsAlert = async (log) => {
 
 const Rule = require("../models/Rule");
 
+const getFieldValue = (source, fieldPath = "") => {
+  if (!source || !fieldPath) return undefined;
+
+  return String(fieldPath)
+    .split(".")
+    .reduce((current, segment) => {
+      if (current === null || current === undefined) return undefined;
+      return current[segment];
+    }, source);
+};
+
+const toComparableList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry).toLowerCase());
+  }
+
+  return String(value || "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const evaluateRuleCondition = ({ fieldValue, operator, value }) => {
+  switch (operator) {
+    case "equals":
+      return String(fieldValue) === String(value);
+    case "not_equals":
+      return String(fieldValue) !== String(value);
+    case "contains":
+      return String(fieldValue || "").toLowerCase().includes(String(value).toLowerCase());
+    case "not_contains":
+      return !String(fieldValue || "").toLowerCase().includes(String(value).toLowerCase());
+    case "greater_than":
+      return Number(fieldValue) > Number(value);
+    case "less_than":
+      return Number(fieldValue) < Number(value);
+    case "exists":
+      return fieldValue !== null && fieldValue !== undefined;
+    case "in":
+      return toComparableList(value).includes(String(fieldValue || "").toLowerCase());
+    case "regex":
+      try {
+        return new RegExp(String(value), "i").test(String(fieldValue || ""));
+      } catch {
+        return false;
+      }
+    default:
+      return false;
+  }
+};
+
 const evaluateDynamicRules = async (log) => {
   if (!isTelemetryLog(log)) return [];
 
@@ -919,23 +970,13 @@ const evaluateDynamicRules = async (log) => {
 
     for (const condition of rule.conditions) {
       const { field, operator, value } = condition;
-      
-      // Basic field extraction (handle nested metadata)
-      let fieldValue = field.startsWith("metadata.") 
-        ? log.metadata?.[field.split(".")[1]] 
-        : log[field];
-      
-      if (fieldValue === undefined) fieldValue = null;
 
-      let conditionMet = false;
-      switch (operator) {
-        case "equals": conditionMet = String(fieldValue) === String(value); break;
-        case "not_equals": conditionMet = String(fieldValue) !== String(value); break;
-        case "contains": conditionMet = String(fieldValue || "").toLowerCase().includes(String(value).toLowerCase()); break;
-        case "greater_than": conditionMet = Number(fieldValue) > Number(value); break;
-        case "less_than": conditionMet = Number(fieldValue) < Number(value); break;
-        case "exists": conditionMet = fieldValue !== null; break;
-      }
+      const fieldValue = getFieldValue(log, field);
+      const conditionMet = evaluateRuleCondition({
+        fieldValue,
+        operator,
+        value,
+      });
 
       if (rule.logic === "OR") {
         if (conditionMet) { match = true; break; }

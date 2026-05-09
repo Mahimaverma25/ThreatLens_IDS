@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const fs = require("fs");
 const path = require("path");
 const logger = require("./utils/logger");
 const { ThreatLensAPIClient, normalizeApiRoot } = require("./services/apiClient");
@@ -20,19 +21,12 @@ try {
 }
 
 const splitList = (value = "") =>
-  String(value)
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+  String(value).split(",").map((x) => x.trim()).filter(Boolean);
 
 const config = {
-  idsEngineUrl: process.env.IDS_ENGINE_URL || "http://localhost:8000/api/detect",
-  idsBatchUrl: process.env.IDS_BATCH_URL || "http://localhost:8000/api/detect/batch",
-
   apiUrl: normalizeApiRoot(process.env.THREATLENS_API_URL || "http://localhost:5001"),
   apiKey: process.env.THREATLENS_API_KEY || "",
   apiSecret: process.env.THREATLENS_API_SECRET || "",
-
   agentId: process.env.AGENT_ID || "agent-001",
   assetId: process.env.ASSET_ID || "host-001",
 
@@ -55,58 +49,88 @@ const config = {
 
   fileWatchPaths: splitList(process.env.FILE_WATCH_PATHS || process.env.FILEWATCH_PATHS || ""),
 
-  enableSnort:
-    String(process.env.ENABLE_SNORT || "false").toLowerCase() === "true",
-
-  snortLogPath:
-    process.env.SNORT_LOG_PATH || "/var/log/snort/alert_fast.txt",
+  enableSnort: String(process.env.ENABLE_SNORT || "false").toLowerCase() === "true",
+  snortLogPath: process.env.SNORT_LOG_PATH || "/var/log/snort/alert_fast.txt",
 
   spoolPath:
     process.env.SPOOL_FILE_PATH ||
     path.join(__dirname, "agent-data", "host-events-spool.jsonl"),
+
+  clearSpoolOnStart:
+    String(process.env.CLEAR_SPOOL_ON_START || "false").toLowerCase() === "true",
 };
 
-function normalizeForIdsEngine(event = {}) {
-  const metadata = event.metadata || {};
+const makeEventId = () =>
+  `${config.agentId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+function normalizeForBackend(event = {}) {
+  const metadata =
+    event.metadata && typeof event.metadata === "object" ? { ...event.metadata } : {};
 
   return {
-    event_id: event.eventId || event.event_id || `${config.agentId}-${Date.now()}`,
+    eventId: event.eventId || event.event_id || metadata.uuid || makeEventId(),
     timestamp: event.timestamp || new Date().toISOString(),
-
     source: event.source || "threatlens-agent",
-    event_type: event.eventType || event.event_type || "host_event",
-
-    agent_id: config.agentId,
-    asset_id: config.assetId,
-
-    src_ip: event.src_ip || event.source_ip || metadata.src_ip || "127.0.0.1",
-    dest_ip: event.dest_ip || event.destination_ip || metadata.dest_ip || "127.0.0.1",
-
-    src_port: Number(event.src_port || metadata.src_port || 0),
-    dest_port: Number(event.dest_port || event.destination_port || event.port || metadata.dest_port || 0),
-    port: Number(event.dest_port || event.destination_port || event.port || metadata.dest_port || 0),
-
-    protocol: String(event.protocol || metadata.protocol || "TCP").toUpperCase(),
-
-    packets: Number(event.packets || metadata.packets || 1),
-    bytes: Number(event.bytes || metadata.bytes || 0),
-    duration: Number(event.duration || metadata.duration || 0),
-
-    request_rate: Number(event.request_rate || metadata.request_rate || 0),
-    failed_attempts: Number(event.failed_attempts || event.failedAttempts || metadata.failed_attempts || 0),
-    flow_count: Number(event.flow_count || event.flowCount || metadata.flow_count || 1),
-    unique_ports: Number(event.unique_ports || event.uniquePorts || metadata.unique_ports || 1),
-    dns_queries: Number(event.dns_queries || event.dnsQueries || metadata.dns_queries || 0),
-    smb_writes: Number(event.smb_writes || event.smbWrites || metadata.smb_writes || 0),
-
-    snort_priority: Number(event.snort_priority || event.priority || 0),
-    is_snort: Number(event.is_snort || 0),
-
-    attack_type: event.attack_type || event.type || event.message || "host_telemetry",
+    eventType: event.eventType || event.event_type || "host_event",
+    ip:
+      event.ip ||
+      event.src_ip ||
+      event.source_ip ||
+      metadata.sourceIp ||
+      metadata.src_ip ||
+      "127.0.0.1",
     message: event.message || "ThreatLens agent event",
-
-    raw: event,
+    assetId: event.assetId || event.asset_id || config.assetId,
+    metadata: {
+      ...metadata,
+      agentId: metadata.agentId || config.agentId,
+      assetId: metadata.assetId || event.assetId || event.asset_id || config.assetId,
+      sourceIp: metadata.sourceIp || event.src_ip || event.source_ip || metadata.src_ip,
+      destinationIp:
+        metadata.destinationIp || event.dest_ip || event.destination_ip || metadata.dest_ip,
+      sourcePort: metadata.sourcePort ?? event.src_port ?? metadata.src_port,
+      destinationPort:
+        metadata.destinationPort ??
+        event.dest_port ??
+        event.destination_port ??
+        event.port ??
+        metadata.dest_port,
+      port:
+        metadata.port ??
+        event.dest_port ??
+        event.destination_port ??
+        event.port ??
+        metadata.dest_port,
+      protocol: metadata.protocol || event.protocol,
+      packets: metadata.packets ?? event.packets,
+      bytes: metadata.bytes ?? event.bytes,
+      duration: metadata.duration ?? event.duration,
+      requestRate:
+        metadata.requestRate ?? event.request_rate ?? event.requestRate ?? metadata.request_rate,
+      failedAttempts:
+        metadata.failedAttempts ??
+        event.failed_attempts ??
+        event.failedAttempts ??
+        metadata.failed_attempts,
+      flowCount: metadata.flowCount ?? event.flow_count ?? event.flowCount ?? metadata.flow_count,
+      uniquePorts:
+        metadata.uniquePorts ??
+        event.unique_ports ??
+        event.uniquePorts ??
+        metadata.unique_ports,
+      dnsQueries:
+        metadata.dnsQueries ?? event.dns_queries ?? event.dnsQueries ?? metadata.dns_queries,
+      smbWrites: metadata.smbWrites ?? event.smb_writes ?? event.smbWrites ?? metadata.smb_writes,
+      snort: metadata.snort,
+      legacyRaw: event.raw,
+    },
   };
+}
+
+function restoreBufferedEvent(entry = {}) {
+  if (entry?.eventType || entry?.metadata) return normalizeForBackend(entry);
+  if (entry?.raw && typeof entry.raw === "object") return normalizeForBackend(entry.raw);
+  return normalizeForBackend(entry);
 }
 
 class ThreatLensHostAgent {
@@ -133,17 +157,17 @@ class ThreatLensHostAgent {
   }
 
   enqueue(event) {
-    const normalized = normalizeForIdsEngine(event);
+    const normalized = normalizeForBackend(event);
 
     if (this.buffer.length >= this.config.maxBufferSize) {
       this.buffer.shift();
-      logger.warn(`Buffer limit reached. Dropping oldest event.`);
+      logger.warn("Buffer limit reached. Dropping oldest event.");
     }
 
     this.buffer.push(normalized);
     this.spoolStore.persist(this.buffer);
 
-    logger.info(`Buffered event: ${normalized.event_type} (${this.buffer.length})`);
+    logger.info(`Buffered event: ${normalized.eventType} (${this.buffer.length})`);
 
     if (this.buffer.length >= this.config.batchSize) {
       void this.flush();
@@ -159,18 +183,20 @@ class ThreatLensHostAgent {
     this.buffer = [];
 
     try {
-      logger.info(`Sending ${batch.length} event(s) to IDS engine`);
+      logger.info(`Sending ${batch.length} event(s) to ThreatLens backend`);
 
-      const result = await this.apiClient.detectBatch(batch);
+      const result = await this.apiClient.submitLogs(batch);
 
       logger.info(
-        `IDS engine accepted ${batch.length} event(s). Status: ${result?.status || "ok"}`
+        `ThreatLens backend accepted ${batch.length} event(s). Inserted: ${
+          result?.inserted ?? result?.insertedCount ?? result?.count ?? "n/a"
+        }`
       );
 
       this.spoolStore.persist(this.buffer);
     } catch (error) {
       logger.error(
-        `IDS engine submission failed: ${
+        `ThreatLens backend submission failed: ${
           error.response
             ? `${error.response.status} ${JSON.stringify(error.response.data)}`
             : error.message
@@ -210,9 +236,7 @@ class ThreatLensHostAgent {
     });
 
     try {
-      if (typeof this.apiClient.sendHeartbeat === "function") {
-        await this.apiClient.sendHeartbeat(heartbeat);
-      }
+      await this.apiClient.sendHeartbeat(heartbeat);
       logger.info("Heartbeat sent");
     } catch (error) {
       logger.warn(
@@ -232,9 +256,7 @@ class ThreatLensHostAgent {
         eventType: "agent.startup",
         loginSuccess: true,
         userName: process.env.USERNAME || process.env.USER || "unknown",
-        metadata: {
-          startup: true,
-        },
+        metadata: { startup: true },
       })
     );
 
@@ -243,9 +265,7 @@ class ThreatLensHostAgent {
         this.enqueue(
           this.systemCollector.collect({
             message: "System telemetry heartbeat",
-            metadata: {
-              collectedBy: "system.collector",
-            },
+            metadata: { collectedBy: "system.collector" },
           })
         );
       }, this.config.systemIntervalMs)
@@ -261,9 +281,7 @@ class ThreatLensHostAgent {
             pid: process.pid,
             parentPid: process.ppid,
             userName: process.env.USERNAME || process.env.USER || "unknown",
-            metadata: {
-              collectedBy: "process.collector",
-            },
+            metadata: { collectedBy: "process.collector" },
           })
         );
       }, this.config.processIntervalMs)
@@ -298,33 +316,26 @@ class ThreatLensHostAgent {
         }
       );
 
-      if (this.snortWatcher) {
-        logger.info("Snort collector enabled");
-      }
+      if (this.snortWatcher) logger.info("Snort collector enabled");
     } else {
       logger.info("Snort collector disabled or collector file missing");
     }
 
-    this.timers.push(
-      setInterval(() => {
-        void this.sendHeartbeat();
-      }, this.config.heartbeatIntervalMs)
-    );
-
-    this.timers.push(
-      setInterval(() => {
-        void this.flush();
-      }, this.config.flushIntervalMs)
-    );
+    this.timers.push(setInterval(() => void this.sendHeartbeat(), this.config.heartbeatIntervalMs));
+    this.timers.push(setInterval(() => void this.flush(), this.config.flushIntervalMs));
   }
 
   async start() {
     logger.info("ThreatLens Hybrid Agent Starting");
-    logger.info(`IDS Engine Detect URL: ${this.config.idsEngineUrl}`);
-    logger.info(`IDS Engine Batch URL: ${this.config.idsBatchUrl}`);
+    logger.info(`ThreatLens API URL: ${this.config.apiUrl}`);
     logger.info(`Asset ID: ${this.config.assetId}`);
 
-    this.buffer = this.spoolStore.load();
+    if (this.config.clearSpoolOnStart && fs.existsSync(this.config.spoolPath)) {
+      fs.unlinkSync(this.config.spoolPath);
+      logger.warn("Old spool file cleared because CLEAR_SPOOL_ON_START=true");
+    }
+
+    this.buffer = this.spoolStore.load().map(restoreBufferedEvent);
 
     if (this.buffer.length > this.config.maxBufferSize) {
       this.buffer = this.buffer.slice(0, this.config.maxBufferSize);
@@ -337,10 +348,10 @@ class ThreatLensHostAgent {
 
     try {
       await this.apiClient.healthCheck();
-      logger.info("IDS engine connected");
+      logger.info("ThreatLens backend connected");
     } catch (error) {
       logger.warn(
-        `IDS engine health check failed: ${
+        `ThreatLens backend health check failed: ${
           error.response
             ? `${error.response.status} ${JSON.stringify(error.response.data)}`
             : error.message
@@ -363,16 +374,10 @@ class ThreatLensHostAgent {
 
       this.timers.forEach((timer) => clearInterval(timer));
 
-      if (this.filewatchCollector?.stop) {
-        this.filewatchCollector.stop();
-      }
-
-      if (this.snortWatcher?.stop) {
-        this.snortWatcher.stop();
-      }
+      if (this.filewatchCollector?.stop) this.filewatchCollector.stop();
+      if (this.snortWatcher?.stop) this.snortWatcher.stop();
 
       await this.flush();
-
       process.exit(0);
     });
 

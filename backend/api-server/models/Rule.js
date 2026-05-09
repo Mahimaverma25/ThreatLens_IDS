@@ -34,7 +34,7 @@ const RuleSchema = new mongoose.Schema({
 
   category: {
     type: String,
-    enum: ["network", "host", "auth", "file", "process", "custom"],
+    enum: ["network", "host", "auth", "file", "process", "malware", "data", "custom"],
     default: "custom"
   },
 

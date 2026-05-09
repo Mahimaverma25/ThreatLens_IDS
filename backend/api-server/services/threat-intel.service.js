@@ -33,17 +33,16 @@ const COUNTRY_NODES = [
 ];
 
 const COUNTRY_BY_CODE = new Map(COUNTRY_NODES.map((node) => [node.code, node]));
+const COUNTRY_BY_NAME = new Map(
+  COUNTRY_NODES.map((node) => [node.country.toLowerCase(), node])
+);
 const DEFAULT_TARGET = COUNTRY_BY_CODE.get("US");
-
-const hashString = (value = "") =>
-  String(value)
-    .split("")
-    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
 
 const inferCountryNode = (value, fallbackCode = "US") => {
   const normalized = String(value || "").trim();
   if (!normalized) {
-    return COUNTRY_BY_CODE.get(fallbackCode) || DEFAULT_TARGET;
+    if (!fallbackCode) return null;
+    return COUNTRY_BY_CODE.get(fallbackCode) || DEFAULT_TARGET || null;
   }
 
   const direct = COUNTRY_BY_CODE.get(normalized.toUpperCase());
@@ -51,8 +50,7 @@ const inferCountryNode = (value, fallbackCode = "US") => {
     return direct;
   }
 
-  const index = hashString(normalized) % COUNTRY_NODES.length;
-  return COUNTRY_NODES[index];
+  return COUNTRY_BY_NAME.get(normalized.toLowerCase()) || null;
 };
 
 const severityToBand = (severity) => {
@@ -103,10 +101,7 @@ const buildThreatIntelSummary = async (orgId) => {
 
   const sourceCountries = topEntries(
     [...alerts, ...logs],
-    (item) =>
-      item?.metadata?.sourceCountry ||
-      item?.metadata?.country ||
-      inferCountryNode(item.ip || item?.metadata?.snort?.srcIp || "").country,
+    (item) => item?.metadata?.sourceCountry || item?.metadata?.country,
     () => 1,
     10
   ).map((entry) => ({
@@ -147,7 +142,11 @@ const buildThreatMapSummary = async (orgId) => {
     const sourceIp = alert.ip || alert.metadata?.sourceIp || "unknown";
     const destinationIp = alert.metadata?.destinationIp || alert.metadata?.snort?.destIp || "";
     const source = inferCountryNode(alert.metadata?.sourceCountry || sourceIp);
-    const target = inferCountryNode(alert.metadata?.destinationCountry || destinationIp, "US");
+    const target = inferCountryNode(alert.metadata?.destinationCountry || destinationIp, "");
+
+    if (!source || !target) {
+      return null;
+    }
 
     const [sourceLng, sourceLat] = source.coordinates;
     const [targetLng, targetLat] = target.coordinates;
@@ -173,7 +172,7 @@ const buildThreatMapSummary = async (orgId) => {
       destinationIp,
       sourceIp,
     };
-  });
+  }).filter(Boolean);
 
   const latestIncident = incidents[0] || null;
 
@@ -186,9 +185,11 @@ const buildThreatMapSummary = async (orgId) => {
       lowSeverity: mappedAttacks.filter((attack) => attack.severity === "low").length,
       activeIndicators: indicators.length,
       sensorDistribution: topEntries(mappedAttacks, (attack) => attack.sensorType, () => 1, 6),
-      headline: latestIncident
-        ? `${latestIncident.attackType} affecting ${latestIncident.sourceIps?.[0] || "multiple assets"}`
-        : "No active attacks in the feed.",
+      headline: mappedAttacks.length
+        ? latestIncident
+          ? `${latestIncident.attackType || latestIncident.title} affecting ${latestIncident.sourceIps?.[0] || "multiple assets"}`
+          : "Geo-enriched attack paths available."
+        : "No geo-enriched attacks in the feed.",
     },
   };
 };

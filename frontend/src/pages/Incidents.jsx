@@ -4,7 +4,7 @@ import { incidents, users } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import useSocket from "../hooks/useSocket";
 
-const STATUS_OPTIONS = ["Open", "Investigating", "Resolved", "False Positive"];
+const STATUS_OPTIONS = ["Open", "Acknowledged", "Investigating", "Contained", "Resolved", "False Positive"];
 const SEVERITY_OPTIONS = ["Critical", "High", "Medium", "Low"];
 
 const safeArray = (value) => (Array.isArray(value) ? value : []);

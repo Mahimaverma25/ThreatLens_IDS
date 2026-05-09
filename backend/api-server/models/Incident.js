@@ -40,6 +40,26 @@ const incidentSchema = new mongoose.Schema(
       trim: true,
     },
 
+    attackType: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true,
+    },
+
+    source: {
+      type: String,
+      trim: true,
+      default: "correlation-engine",
+      index: true,
+    },
+
+    summary: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     severity: {
       type: String,
       enum: ["Critical", "High", "Medium", "Low"],
@@ -49,7 +69,7 @@ const incidentSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["Open", "Investigating", "Resolved", "False Positive"],
+      enum: ["Open", "Acknowledged", "Investigating", "Contained", "Resolved", "False Positive"],
       default: "Open",
       index: true,
     },
@@ -58,6 +78,20 @@ const incidentSchema = new mongoose.Schema(
       {
         type: String,
         trim: true,
+      },
+    ],
+
+    destinationIps: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+
+    assetIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Asset",
       },
     ],
 
@@ -75,6 +109,32 @@ const incidentSchema = new mongoose.Schema(
     },
 
     notes: [incidentNoteSchema],
+
+    confidence: {
+      type: Number,
+      min: 0,
+      max: 1,
+      default: 0.5,
+    },
+
+    risk_score: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 50,
+      index: true,
+    },
+
+    eventCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    metadata: {
+      type: Object,
+      default: {},
+    },
 
     firstSeen: {
       type: Date,

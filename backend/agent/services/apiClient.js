@@ -32,6 +32,24 @@ class ThreatLensAPIClient {
       options.apiUrl || process.env.THREATLENS_API_URL || "http://localhost:5001"
     );
 
+    this.idsEngineUrl = trimTrailingSlashes(
+      options.idsEngineUrl ||
+        process.env.IDS_ENGINE_URL ||
+        process.env.THREATLENS_IDS_ENGINE_URL ||
+        "http://localhost:8000"
+    );
+
+    this.idsEngineBatchPath =
+      options.idsEngineBatchPath ||
+      process.env.IDS_ENGINE_BATCH_PATH ||
+      "/api/detect/batch";
+
+    this.idsEngineApiKey =
+      options.idsEngineApiKey ||
+      process.env.IDS_ENGINE_API_KEY ||
+      process.env.INTEGRATION_API_KEY ||
+      "";
+
     this.apiKey = options.apiKey || process.env.THREATLENS_API_KEY || "";
     this.apiSecret = options.apiSecret || process.env.THREATLENS_API_SECRET || "";
     this.assetId = options.assetId || process.env.ASSET_ID || "";
@@ -49,6 +67,15 @@ class ThreatLensAPIClient {
       timeout: Number(process.env.API_TIMEOUT_MS || 10000),
       headers: {
         "User-Agent": `ThreatLens-Agent/${process.env.AGENT_VERSION || "1.0.0"}`,
+      },
+    });
+
+    this.idsClient = axios.create({
+      baseURL: this.idsEngineUrl,
+      timeout: Number(process.env.IDS_ENGINE_TIMEOUT_MS || 15000),
+      headers: {
+        "User-Agent": `ThreatLens-Agent/${process.env.AGENT_VERSION || "1.0.0"}`,
+        "Content-Type": "application/json",
       },
     });
   }
@@ -71,8 +98,6 @@ class ThreatLensAPIClient {
 
     return {
       "Content-Type": "application/json",
-
-      // Keep lowercase because Node/Express normalizes headers anyway.
       "x-api-key": this.apiKey,
       "x-timestamp": timestamp,
       "x-nonce": nonce,
@@ -80,6 +105,19 @@ class ThreatLensAPIClient {
       "x-signature": signature,
       "x-signature-version": "v2",
     };
+  }
+
+  buildIdsHeaders() {
+    const headers = {
+      "Content-Type": "application/json",
+    };
+
+    if (this.idsEngineApiKey) {
+      headers["x-integration-api-key"] = this.idsEngineApiKey;
+      headers["x-api-key"] = this.idsEngineApiKey;
+    }
+
+    return headers;
   }
 
   getRetryDelay(attempt) {
@@ -92,11 +130,7 @@ class ThreatLensAPIClient {
     const status = Number(error.response?.status || 0);
 
     if (attempt >= this.maxRetries) return false;
-
-    // Do not retry auth/signature/conflict problems.
     if ([400, 401, 403, 409].includes(status)) return false;
-
-    // Retry rate limit and server/network errors.
     if (status === 429 || status >= 500 || !status) return true;
 
     return false;
@@ -182,6 +216,42 @@ class ThreatLensAPIClient {
       return response.data;
     } catch (error) {
       throw this.formatError(error, "Health check");
+    }
+  }
+
+  async idsHealthCheck() {
+    try {
+      const response = await this.idsClient.get("/health", {
+        headers: this.buildIdsHeaders(),
+      });
+      return response.data;
+    } catch (error) {
+      throw this.formatError(error, "IDS engine health check");
+    }
+  }
+
+  async detectBatch(events, attempt = 1) {
+    const payload = Array.isArray(events?.events)
+      ? events
+      : {
+          asset_id: this.assetId,
+          timestamp: new Date().toISOString(),
+          events: Array.isArray(events) ? events : [events],
+        };
+
+    try {
+      const response = await this.idsClient.post(this.idsEngineBatchPath, payload, {
+        headers: this.buildIdsHeaders(),
+      });
+
+      return response.data;
+    } catch (error) {
+      if (!this.shouldRetry(error, attempt)) {
+        throw this.formatError(error, "IDS engine submission");
+      }
+
+      await wait(this.getRetryDelay(attempt));
+      return this.detectBatch(payload.events, attempt + 1);
     }
   }
 }

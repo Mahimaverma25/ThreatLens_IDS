@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const Incident = require("../models/Incident");
 const Alert = require("../models/Alerts");
 
-const STATUS_OPTIONS = ["Open", "Investigating", "Resolved", "False Positive"];
+const STATUS_OPTIONS = ["Open", "Acknowledged", "Investigating", "Contained", "Resolved", "False Positive"];
 const SEVERITY_OPTIONS = ["Critical", "High", "Medium", "Low"];
 
 const getOrgId = (req) => req.user?._org_id || req.user?.orgId || req.orgId || null;

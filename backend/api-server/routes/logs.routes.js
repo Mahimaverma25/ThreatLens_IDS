@@ -29,18 +29,14 @@ const {
 
 const SUPPORTED_UPLOAD_EXTENSIONS = [".csv", ".json", ".log", ".txt", ".ndjson"];
 
-const ALLOWED_CSV_MIME_TYPES = [
+const ALLOWED_MIME_TYPES = [
   "text/csv",
   "application/csv",
   "application/vnd.ms-excel",
   "text/plain",
-];
-
-const GENERIC_UPLOAD_MIME_TYPES = [
   "application/json",
   "application/x-ndjson",
   "application/octet-stream",
-  "text/plain",
 ];
 
 const uploadDir = path.join(os.tmpdir(), "threatlens-uploads");
@@ -57,9 +53,7 @@ const safeUploadName = (originalName = "upload") => {
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, callback) => callback(null, uploadDir),
-    filename: (req, file, callback) => {
-      callback(null, safeUploadName(file.originalname));
-    },
+    filename: (req, file, callback) => callback(null, safeUploadName(file.originalname)),
   }),
 
   limits: {
@@ -70,35 +64,24 @@ const upload = multer({
     const lowerName = String(file.originalname || "").toLowerCase();
     const mimeType = String(file.mimetype || "").toLowerCase();
 
-    const isSupported = SUPPORTED_UPLOAD_EXTENSIONS.some((extension) =>
+    const hasValidExtension = SUPPORTED_UPLOAD_EXTENSIONS.some((extension) =>
       lowerName.endsWith(extension)
     );
 
-    if (!isSupported) {
+    const hasValidMime =
+      !mimeType ||
+      ALLOWED_MIME_TYPES.includes(mimeType) ||
+      mimeType.startsWith("text/") ||
+      mimeType.includes("csv") ||
+      mimeType.includes("json");
+
+    if (!hasValidExtension) {
       return callback(
         new Error("Unsupported file type. Allowed: CSV, JSON, NDJSON, LOG, TXT")
       );
     }
 
-    if (lowerName.endsWith(".csv")) {
-      const csvMimeOk =
-        !mimeType ||
-        ALLOWED_CSV_MIME_TYPES.includes(mimeType) ||
-        mimeType.includes("csv");
-
-      if (!csvMimeOk) {
-        return callback(new Error("Invalid CSV upload type"));
-      }
-
-      return callback(null, true);
-    }
-
-    const genericMimeOk =
-      !mimeType ||
-      GENERIC_UPLOAD_MIME_TYPES.includes(mimeType) ||
-      mimeType.startsWith("text/");
-
-    if (!genericMimeOk) {
+    if (!hasValidMime) {
       return callback(new Error("Invalid upload MIME type"));
     }
 
@@ -106,23 +89,29 @@ const upload = multer({
   },
 });
 
+const handleUpload = (req, res, next) => {
+  upload.single("file")(req, res, (error) => {
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || "File upload failed",
+      });
+    }
+
+    return next();
+  });
+};
+
 /**
- * ==============================
  * Agent / HIDS / NIDS ingest route
- * ==============================
+ *
+ * Final URL:
+ * POST /api/logs/ingest
  *
  * Used by:
- * - agent/apiClient.js
- * - realtime-agent.js
+ * - backend/agent/services/apiClient.js
+ * - HIDS agent
  * - Snort/NIDS collector
- *
- * Required headers:
- * - x-api-key
- * - x-timestamp
- * - x-nonce
- * - x-asset-id
- * - x-signature
- * - x-signature-version
  */
 router.post(
   "/ingest",
@@ -133,16 +122,26 @@ router.post(
 );
 
 /**
- * ==============================
- * JWT protected log routes
- * ==============================
+ * JWT protected dashboard/log routes
  */
 
-// List logs for dashboard/logs page
-router.get("/", authenticate, orgIsolation, authorizeViewer, asyncHandler(listLogs));
+// List logs for Logs page / Dashboard
+router.get(
+  "/",
+  authenticate,
+  orgIsolation,
+  authorizeViewer,
+  asyncHandler(listLogs)
+);
 
 // Create manual/admin log
-router.post("/", authenticate, orgIsolation, authorizeAdmin, asyncHandler(createLog));
+router.post(
+  "/",
+  authenticate,
+  orgIsolation,
+  authorizeAdmin,
+  asyncHandler(createLog)
+);
 
 // Upload CSV/JSON/NDJSON/LOG/TXT logs
 router.post(
@@ -150,8 +149,40 @@ router.post(
   authenticate,
   orgIsolation,
   authorizeAdmin,
-  upload.single("file"),
+  handleUpload,
   asyncHandler(uploadLogs)
+);
+
+/**
+ * Manual test route for demo/admin testing
+ * Final URL:
+ * POST /api/logs/simulate
+ */
+router.post(
+  "/simulate",
+  authenticate,
+  orgIsolation,
+  authorizeAdmin,
+  asyncHandler(async (req, res) => {
+    const fakeLog = {
+      eventType: "brute_force_attempt",
+      source: "manual-simulation",
+      ip: "192.168.1.50",
+      severity: "high",
+      message: "Simulated brute force SSH attempt detected",
+      assetId: req.body.assetId || "demo-asset",
+      metadata: {
+        failedAttempts: 12,
+        destinationPort: 22,
+        protocol: "TCP",
+        simulated: true,
+      },
+    };
+
+    req.body = { logs: [fakeLog] };
+
+    return ingestLogs(req, res);
+  })
 );
 
 module.exports = router;

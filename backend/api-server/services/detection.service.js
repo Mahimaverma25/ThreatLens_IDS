@@ -1,4 +1,4 @@
-const { randomUUID } = require("crypto");
+const { createHash, createHmac, randomUUID } = require("crypto");
 const axios = require("axios");
 
 const config = require("../config/env");
@@ -13,6 +13,9 @@ const IDS_TIMEOUT_MS = Number(process.env.IDS_ENGINE_TIMEOUT_MS || 5000);
 const DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 const PORT_SCAN_WINDOW_MS = 5 * 60 * 1000;
 const BRUTE_FORCE_WINDOW_MS = 10 * 60 * 1000;
+const IDS_ENGINE_BASE_URL = String(config.idsEngineUrl || "http://localhost:8000")
+  .replace(/\/+$/, "")
+  .replace(/\/api\/?$/, "");
 
 const protocolCodes = {
   TCP: 1,
@@ -217,9 +220,23 @@ const getSensorType = (log) =>
 const isIdsSensorLog = (log) =>
   ["snort", "suricata", "nids"].includes(getSensorType(log));
 
-const buildIdsHeaders = () => {
-  if (!config.integrationApiKey) return {};
-  return { "x-integration-api-key": config.integrationApiKey };
+const buildIdsHeaders = (payload = null) => {
+  if (!config.idsEngineApiKey) return {};
+
+  const body = payload ? JSON.stringify(payload) : "";
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signingKey = createHash("sha256")
+    .update(String(config.idsEngineApiSecret || ""), "utf8")
+    .digest();
+  const signature = createHmac("sha256", signingKey)
+    .update(`${timestamp}.${body}`, "utf8")
+    .digest("hex");
+
+  return {
+    "X-API-Key": config.idsEngineApiKey,
+    "X-Timestamp": timestamp,
+    "X-Signature": signature,
+  };
 };
 
 const getRecommendedAction = (attackType) => {
@@ -1007,7 +1024,7 @@ const getIdsEngineHealth = async () => {
   }
 
   try {
-    const response = await axios.get(`${config.idsEngineUrl}/health`, {
+    const response = await axios.get(`${IDS_ENGINE_BASE_URL}/api/health`, {
       timeout: 3000,
       headers: buildIdsHeaders(),
     });
@@ -1084,13 +1101,13 @@ const analyzeLogs = async (logs = []) => {
 
   try {
     const response = await axios.post(
-      `${config.idsEngineUrl}/analyze`,
+      `${IDS_ENGINE_BASE_URL}/api/analyze`,
       { events },
       {
         timeout: IDS_TIMEOUT_MS,
         headers: {
           "Content-Type": "application/json",
-          ...buildIdsHeaders(),
+          ...buildIdsHeaders({ events }),
         },
       }
     );

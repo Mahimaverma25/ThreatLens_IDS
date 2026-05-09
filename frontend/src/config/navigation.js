@@ -26,8 +26,10 @@ export const activeNavigationItems = [
     group: "Security Operations",
     items: [
       { label: "Incidents", path: "/incidents", shortLabel: "IN", roles: ["admin", "analyst"] },
+      { label: "Threat Intel", path: "/threat-intel", shortLabel: "TI", roles: ["admin", "analyst", "viewer", "user"] },
       { label: "Threat Map", path: "/threat-map", shortLabel: "TM", roles: ["admin", "analyst", "viewer", "user"] },
       { label: "Blocked IPs", path: "/blocked-ips", shortLabel: "BI", roles: ["admin", "analyst"] },
+      { label: "Playbooks", path: "/response-playbooks", shortLabel: "PB", roles: ["admin", "analyst"] },
     ],
   },
 
@@ -61,8 +63,6 @@ export const flatNavigationItems = activeNavigationItems.flatMap((group) => grou
 export const futureModuleItems = [
   "Access Management",
   "Alert Details",
-  "Response Playbooks",
-  "Threat Intel",
 ];
 
 /* ================= PAGE META ================= */

@@ -792,7 +792,7 @@ const Rules = () => {
                       <option value="metadata.failedAttempts">Failed Attempts</option>
                       <option value="metadata.requestRate">Request Rate</option>
                       <option value="metadata.protocol">Protocol</option>
-                      <option value="metadata.dstPort">Destination Port</option>
+                      <option value="metadata.destinationPort">Destination Port</option>
                     </select>
 
                     <select

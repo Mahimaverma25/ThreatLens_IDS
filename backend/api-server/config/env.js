@@ -42,6 +42,14 @@ const enableIdsAnalysis = process.env.ENABLE_IDS_ANALYSIS !== "false";
 const integrationApiKey = process.env.INTEGRATION_API_KEY
 	? String(process.env.INTEGRATION_API_KEY).trim()
 	: "";
+const idsEngineApiKey = process.env.IDS_ENGINE_API_KEY
+	? String(process.env.IDS_ENGINE_API_KEY).trim()
+	: integrationApiKey;
+const idsEngineApiSecret = process.env.IDS_ENGINE_API_SECRET
+	? String(process.env.IDS_ENGINE_API_SECRET).trim()
+	: process.env.INTEGRATION_API_SECRET
+		? String(process.env.INTEGRATION_API_SECRET).trim()
+		: "";
 
 if (isProduction && corsOrigins.length === 0) {
 	throw new Error("CORS_ORIGIN must be configured in production");
@@ -51,8 +59,12 @@ if (isProduction && (!process.env.MONGO_URI || !String(process.env.MONGO_URI).tr
 	throw new Error("MONGO_URI is required in production");
 }
 
-if (isProduction && enableIdsAnalysis && !integrationApiKey) {
-	throw new Error("INTEGRATION_API_KEY is required when IDS analysis is enabled in production");
+if (isProduction && enableIdsAnalysis && !idsEngineApiKey) {
+	throw new Error("IDS_ENGINE_API_KEY or INTEGRATION_API_KEY is required when IDS analysis is enabled in production");
+}
+
+if (isProduction && enableIdsAnalysis && !idsEngineApiSecret) {
+	throw new Error("IDS_ENGINE_API_SECRET or INTEGRATION_API_SECRET is required when IDS analysis is enabled in production");
 }
 
 module.exports = {
@@ -81,6 +93,8 @@ module.exports = {
 	refreshCookieSameSite: process.env.REFRESH_COOKIE_SAMESITE || "lax",
 	enableIdsAnalysis,
 	integrationApiKey,
+	idsEngineApiKey,
+	idsEngineApiSecret,
 	requestLogLevel: process.env.REQUEST_LOG_LEVEL || "info",
 	alertCorrelationWindowMins: getNumber(process.env.ALERT_CORRELATION_WINDOW_MINS, 10),
 	dosThresholdPerMinute: getNumber(process.env.DOS_THRESHOLD_PER_MINUTE, 150),

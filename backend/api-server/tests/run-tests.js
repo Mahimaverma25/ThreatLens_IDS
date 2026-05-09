@@ -65,6 +65,10 @@ const tests = [
     assert.equal(node.code, "US");
   },
   () => {
+    const node = inferCountryNode("203.0.113.10", "");
+    assert.equal(node, null);
+  },
+  () => {
     assert.equal(severityToBand("Critical"), "high");
     assert.equal(severityToBand("Medium"), "medium");
     assert.equal(severityToBand("Low"), "low");

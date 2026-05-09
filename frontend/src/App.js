@@ -19,8 +19,10 @@ import ModelHealth from "./pages/ModelHealth";
 
 /* 🔥 NEW PAGES (VERY IMPORTANT) */
 import Incidents from "./pages/Incidents";
+import ThreatIntel from "./pages/ThreatIntel";
 import ThreatMap from "./pages/ThreatMap";
 import BlockedIPs from "./pages/BlockedIPs";
+import ResponsePlaybooks from "./pages/ResponsePlaybooks";
 import Users from "./pages/Users";
 import Rules from "./pages/Rules";
 import Settings from "./pages/Settings";
@@ -141,8 +143,10 @@ function AppRoutes() {
 
       {/* SECURITY */}
       <Route path="/incidents" element={<AppPage allowedRoles={["admin","analyst"]}><Incidents /></AppPage>} />
+      <Route path="/threat-intel" element={<AppPage><ThreatIntel /></AppPage>} />
       <Route path="/threat-map" element={<AppPage><ThreatMap /></AppPage>} />
       <Route path="/blocked-ips" element={<AppPage allowedRoles={["admin","analyst"]}><BlockedIPs /></AppPage>} />
+      <Route path="/response-playbooks" element={<AppPage allowedRoles={["admin","analyst"]}><ResponsePlaybooks /></AppPage>} />
 
       {/* ML */}
       <Route path="/reports" element={<AppPage allowedRoles={["admin","analyst"]}><Reports /></AppPage>} />

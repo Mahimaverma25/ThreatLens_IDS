@@ -8,14 +8,23 @@ const { appLogger, serializeError } = require("../utils/logger");
 
 const SIGNATURE_VERSION = "v2";
 
-const sha256Hex = (value) =>
-  crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
-
 const buildPayloadHash = (body) =>
   crypto
     .createHash("sha256")
     .update(JSON.stringify(body || {}), "utf8")
     .digest("hex");
+
+const getSigningKeyFromStoredHash = (secretHash) => {
+  const value = String(secretHash || "").trim();
+
+  // Compatible with agent apiClient.js:
+  // agent uses crypto.createHash("sha256").update(secret).digest()
+  if (/^[a-f0-9]{64}$/i.test(value)) {
+    return Buffer.from(value, "hex");
+  }
+
+  return value;
+};
 
 const buildSignature = ({ signingKey, timestamp, nonce, assetId, body }) =>
   crypto
@@ -24,14 +33,18 @@ const buildSignature = ({ signingKey, timestamp, nonce, assetId, body }) =>
     .digest("hex");
 
 const safeCompare = (provided, expected) => {
-  if (!provided || !expected) return false;
+  try {
+    if (!provided || !expected) return false;
 
-  const providedBuffer = Buffer.from(String(provided), "hex");
-  const expectedBuffer = Buffer.from(String(expected), "hex");
+    const providedBuffer = Buffer.from(String(provided), "hex");
+    const expectedBuffer = Buffer.from(String(expected), "hex");
 
-  if (providedBuffer.length !== expectedBuffer.length) return false;
+    if (providedBuffer.length !== expectedBuffer.length) return false;
 
-  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+    return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+  } catch {
+    return false;
+  }
 };
 
 const getHeader = (req, name) => {
@@ -124,21 +137,19 @@ const validateAPIKey = async (req, res, next) => {
       });
     }
 
-    if (String(keyDoc._asset_id.asset_id) !== assetIdHeader) {
+    const linkedAssetIdentity =
+      keyDoc._asset_id.asset_id ||
+      keyDoc._asset_id.assetId ||
+      keyDoc._asset_id._id?.toString();
+
+    if (String(linkedAssetIdentity) !== assetIdHeader) {
       return res.status(401).json({
         success: false,
         error: "Asset mismatch for API key",
       });
     }
 
-    /**
-     * Compatible with agent/services/apiClient.js:
-     *
-     * signing key = sha256(secret).hex
-     * payload hash = sha256(JSON.stringify(body)).hex
-     * signature = HMAC_SHA256(signingKey, `${timestamp}.${nonce}.${assetId}.${payloadHash}`)
-     */
-    const signingKey = keyDoc.secret_key_hash;
+    const signingKey = getSigningKeyFromStoredHash(keyDoc.secret_key_hash);
 
     const expectedSignature = buildSignature({
       signingKey,
