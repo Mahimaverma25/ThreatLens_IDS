@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const Incident = require("../models/Incident");
-const Alert = require("../models/Alert");
+const Alert = require("../models/Alerts");
 
 const STATUS_OPTIONS = ["Open", "Investigating", "Resolved", "False Positive"];
 const SEVERITY_OPTIONS = ["Critical", "High", "Medium", "Low"];

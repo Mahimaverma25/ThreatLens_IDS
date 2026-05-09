@@ -1,31 +1,75 @@
 const router = require("express").Router();
-const authenticate = require("../middleware/auth.middleware");
+
 const { authorizeAdmin } = require("../middleware/authorize.middleware");
 const asyncHandler = require("../utils/asyncHandler");
+
 const {
   generateAPIKey,
   listAPIKeys,
   getAPIKey,
   revokeAPIKey,
-  rotateAPIKey
+  rotateAPIKey,
 } = require("../controllers/apikey.controller");
 
-// All API key routes require authentication, org isolation (app level), and admin role
-router.use(authenticate, authorizeAdmin);
+/**
+ * Base route:
+ * /api/admin/api-keys
+ *
+ * Important:
+ * authenticate + orgIsolation are already applied in server.js:
+ *
+ * app.use(
+ *   "/api/admin/api-keys",
+ *   authenticate,
+ *   orgIsolation,
+ *   apikeyRoutes
+ * );
+ *
+ * So do not repeat authenticate here.
+ */
 
-// List all API keys for organization
+router.use(authorizeAdmin);
+
+/**
+ * GET /api/admin/api-keys
+ * List all API keys for the current organization.
+ */
 router.get("/", asyncHandler(listAPIKeys));
 
-// Get specific API key details
-router.get("/:id", asyncHandler(getAPIKey));
-
-// Generate new API key for an asset
+/**
+ * POST /api/admin/api-keys
+ * Generate a new API key for an asset.
+ *
+ * Body:
+ * {
+ *   "asset_id": "...",
+ *   "key_name": "Production Agent Key",
+ *   "expiration_days": 365
+ * }
+ */
 router.post("/", asyncHandler(generateAPIKey));
 
-// Revoke API key
+/**
+ * GET /api/admin/api-keys/:id
+ * Get one API key detail without exposing secret hash.
+ */
+router.get("/:id", asyncHandler(getAPIKey));
+
+/**
+ * DELETE /api/admin/api-keys/:id
+ * Revoke API key.
+ */
 router.delete("/:id", asyncHandler(revokeAPIKey));
 
-// Rotate API key (generate new secret)
+/**
+ * POST /api/admin/api-keys/:id/rotate
+ * Rotate API key secret.
+ *
+ * Body:
+ * {
+ *   "expiration_days": 365
+ * }
+ */
 router.post("/:id/rotate", asyncHandler(rotateAPIKey));
 
 module.exports = router;

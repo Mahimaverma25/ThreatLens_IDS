@@ -5,10 +5,11 @@ const config = require("../config/env");
 const Alert = require("../models/Alerts");
 const Asset = require("../models/Asset");
 const Log = require("../models/Log");
+
 const { upsertIncidentFromAlert } = require("./incident.service");
 const { emitDashboardUpdate, emitNewAlert } = require("./socket.service");
 
-const IDS_TIMEOUT_MS = 5000;
+const IDS_TIMEOUT_MS = Number(process.env.IDS_ENGINE_TIMEOUT_MS || 5000);
 const DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 const PORT_SCAN_WINDOW_MS = 5 * 60 * 1000;
 const BRUTE_FORCE_WINDOW_MS = 10 * 60 * 1000;
@@ -44,16 +45,18 @@ const assetCriticalityWeights = {
   low: 5,
 };
 
-const mapProtocol = (value) => protocolCodes[String(value || "").toUpperCase()] || 0;
-
-const trimText = (value, fallback = "") => {
-  const normalized = String(value ?? fallback).trim();
-  return normalized;
+const severityRank = {
+  Low: 1,
+  Medium: 2,
+  High: 3,
+  Critical: 4,
 };
+
+const trimText = (value, fallback = "") => String(value ?? fallback).trim();
 
 const isMeaningful = (value) => {
   const normalized = trimText(value).toLowerCase();
-  return Boolean(normalized) && normalized !== "unknown" && normalized !== "n/a" && normalized !== "-";
+  return Boolean(normalized) && !["unknown", "n/a", "-"].includes(normalized);
 };
 
 const safeNumber = (value, fallback = 0) => {
@@ -74,27 +77,24 @@ const clampRiskScore = (value) => {
 
 const normalizeSeverity = (value, fallback = "Medium") => {
   const normalized = trimText(value).toLowerCase();
+
   if (normalized === "critical") return "Critical";
   if (normalized === "high") return "High";
   if (normalized === "medium") return "Medium";
   if (normalized === "low") return "Low";
+  if (normalized === "error") return "High";
+  if (normalized === "warn" || normalized === "warning") return "Medium";
+
   return fallback;
 };
 
-const severityRank = {
-  Low: 1,
-  Medium: 2,
-  High: 3,
-  Critical: 4,
-};
-
 const maxSeverity = (current, incoming) =>
-  (severityRank[incoming] || 0) > (severityRank[current] || 0) ? incoming : current;
+  (severityRank[incoming] || 0) > (severityRank[current] || 0)
+    ? incoming
+    : current;
 
-const getTimestamp = (value) => {
-  const parsed = new Date(value || Date.now());
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
-};
+const mapProtocol = (value) =>
+  protocolCodes[String(value || "").toUpperCase()] || 0;
 
 const getMessageText = (log) =>
   trimText(
@@ -119,8 +119,11 @@ const getSourceIp = (log) =>
   trimText(
     log?.metadata?.normalized?.srcIp ||
       log?.metadata?.sourceIp ||
+      log?.metadata?.srcIp ||
       log?.metadata?.network?.sourceIp ||
       log?.metadata?.snort?.srcIp ||
+      log?.sourceIp ||
+      log?.srcIp ||
       log?.ip
   );
 
@@ -128,27 +131,31 @@ const getDestinationIp = (log) =>
   trimText(
     log?.metadata?.normalized?.destIp ||
       log?.metadata?.destinationIp ||
+      log?.metadata?.destIp ||
       log?.metadata?.network?.destinationIp ||
       log?.metadata?.snort?.destIp ||
-      log?.destinationIp
+      log?.destinationIp ||
+      log?.destIp
   );
 
 const getDestinationPort = (log) =>
   safeNumber(
     log?.metadata?.normalized?.port ??
       log?.metadata?.destinationPort ??
+      log?.metadata?.destPort ??
       log?.metadata?.port ??
       log?.metadata?.network?.destinationPort ??
       log?.metadata?.snort?.destPort ??
-      log?.destinationPort,
+      log?.destinationPort ??
+      log?.destPort,
     0
   );
 
 const getRequestRate = (log) =>
   safeNumber(
     log?.metadata?.requestRate ??
-      log?.metadata?.network?.requestRate ??
-      log?.metadata?.request_rate,
+      log?.metadata?.request_rate ??
+      log?.metadata?.network?.requestRate,
     0
   );
 
@@ -195,16 +202,10 @@ const getProcessName = (log) =>
   ).toLowerCase();
 
 const getCommandLine = (log) =>
-  trimText(
-    log?.metadata?.host?.commandLine ||
-      log?.metadata?.commandLine
-  ).toLowerCase();
+  trimText(log?.metadata?.host?.commandLine || log?.metadata?.commandLine).toLowerCase();
 
 const getFilePath = (log) =>
-  trimText(
-    log?.metadata?.host?.filePath ||
-      log?.metadata?.filePath
-  ).toLowerCase();
+  trimText(log?.metadata?.host?.filePath || log?.metadata?.filePath).toLowerCase();
 
 const getSensorType = (log) =>
   trimText(
@@ -213,47 +214,51 @@ const getSensorType = (log) =>
       log?.source
   ).toLowerCase();
 
-const isIdsSensorLog = (log) => ["snort", "suricata", "nids"].includes(getSensorType(log));
+const isIdsSensorLog = (log) =>
+  ["snort", "suricata", "nids"].includes(getSensorType(log));
 
 const buildIdsHeaders = () => {
-  if (!config.integrationApiKey) {
-    return {};
-  }
-
-  return {
-    "x-integration-api-key": config.integrationApiKey,
-  };
+  if (!config.integrationApiKey) return {};
+  return { "x-integration-api-key": config.integrationApiKey };
 };
 
 const getRecommendedAction = (attackType) => {
   const normalized = trimText(attackType).toLowerCase();
 
   if (normalized.includes("port scan")) {
-    return "Block or rate-limit the scanning source, review exposed services, and validate perimeter firewall rules.";
+    return "Block or rate-limit the scanning source, review exposed services, and validate firewall rules.";
   }
-  if (normalized.includes("ssh brute")) {
-    return "Protect the targeted SSH service, enforce MFA and key-based auth, and block the attacking source IP.";
+
+  if (normalized.includes("brute")) {
+    return "Review authentication logs, block the attacking source, enforce MFA, and protect the targeted service.";
   }
-  if (normalized.includes("web brute")) {
-    return "Protect the affected login endpoint, enable rate limiting or CAPTCHA, and review impacted accounts.";
+
+  if (
+    normalized.includes("ddos") ||
+    normalized.includes("dos") ||
+    normalized.includes("flood")
+  ) {
+    return "Rate-limit traffic, inspect service saturation, and apply upstream filtering if required.";
   }
-  if (normalized.includes("ddos") || normalized.includes("dos") || normalized.includes("flood")) {
-    return "Rate-limit traffic, engage upstream filtering, and inspect service saturation and network path health.";
-  }
+
   if (normalized.includes("dns")) {
-    return "Review resolver traffic, block suspicious domains or resolvers, and investigate possible tunneling.";
+    return "Review resolver traffic, block suspicious resolvers or domains, and investigate DNS tunneling.";
   }
+
   if (normalized.includes("exfiltration")) {
-    return "Contain the asset, review outbound transfer destinations, and preserve evidence for incident response.";
+    return "Contain the asset, review outbound transfer destinations, and preserve evidence.";
   }
+
   if (normalized.includes("process")) {
-    return "Isolate the endpoint, inspect process tree and command line, and collect endpoint forensic artifacts.";
+    return "Isolate the endpoint, inspect process tree and command line, and collect forensic artifacts.";
   }
-  if (normalized.includes("file integrity")) {
-    return "Verify the changed file against baseline, review persistence indicators, and investigate local compromise.";
+
+  if (normalized.includes("file")) {
+    return "Verify changed files against baseline and investigate persistence or unauthorized modification.";
   }
-  if (normalized.includes("privilege escalation")) {
-    return "Review account activity, isolate the host, and investigate local privilege abuse or exploitation.";
+
+  if (normalized.includes("privilege")) {
+    return "Review account activity, isolate the host, and investigate privilege abuse.";
   }
 
   return "Review correlated evidence, validate the alert, and escalate according to the incident response playbook.";
@@ -281,11 +286,20 @@ const calculateRiskScore = async ({ log, severity, confidence, attackType }) => 
     ? await Asset.findById(log._asset_id).select("asset_criticality")
     : null;
 
-  const severityWeight = severityProfiles[severity]?.weight ?? severityProfiles.Medium.weight;
-  const confidenceWeight = Math.round(clampConfidence(confidence, severityProfiles[severity]?.confidence ?? 0.5) * 25);
+  const severityWeight =
+    severityProfiles[severity]?.weight ?? severityProfiles.Medium.weight;
+
+  const confidenceWeight = Math.round(
+    clampConfidence(
+      confidence,
+      severityProfiles[severity]?.confidence ?? 0.5
+    ) * 25
+  );
+
   const assetCriticalityWeight =
-    assetCriticalityWeights[String(asset?.asset_criticality || "medium").toLowerCase()] ??
-    assetCriticalityWeights.medium;
+    assetCriticalityWeights[
+      String(asset?.asset_criticality || "medium").toLowerCase()
+    ] ?? assetCriticalityWeights.medium;
 
   const recentFrequency = await Alert.countDocuments({
     _org_id: log._org_id,
@@ -296,7 +310,12 @@ const calculateRiskScore = async ({ log, severity, confidence, attackType }) => 
 
   const eventFrequencyWeight = Math.min(15, recentFrequency * 2);
 
-  return clampRiskScore(severityWeight + confidenceWeight + eventFrequencyWeight + assetCriticalityWeight);
+  return clampRiskScore(
+    severityWeight +
+      confidenceWeight +
+      eventFrequencyWeight +
+      assetCriticalityWeight
+  );
 };
 
 const buildAlertPayload = async ({
@@ -312,10 +331,13 @@ const buildAlertPayload = async ({
   recommendedAction,
 }) => {
   const normalizedSeverity = normalizeSeverity(severity);
+
   const resolvedConfidence = clampConfidence(
     confidence,
-    severityProfiles[normalizedSeverity]?.confidence ?? severityProfiles.Medium.confidence
+    severityProfiles[normalizedSeverity]?.confidence ??
+      severityProfiles.Medium.confidence
   );
+
   const resolvedRiskScore =
     riskScore ??
     (await calculateRiskScore({
@@ -365,7 +387,7 @@ const createDetectionAlert = async ({
   log,
   attackType,
   type = attackType,
-  severity,
+  severity = "Medium",
   confidence,
   risk_score,
   source = "rule-engine",
@@ -383,7 +405,7 @@ const createDetectionAlert = async ({
     source,
     relatedLogs,
     metadata,
-    recommendedAction: recommendedAction || getRecommendedAction(attackType),
+    recommendedAction,
   });
 
   const duplicate = await findDuplicateAlert({
@@ -395,28 +417,47 @@ const createDetectionAlert = async ({
 
   if (duplicate) {
     duplicate.severity = maxSeverity(duplicate.severity, payload.severity);
-    duplicate.confidence = Math.max(Number(duplicate.confidence || 0), Number(payload.confidence || 0));
-    duplicate.risk_score = Math.max(Number(duplicate.risk_score || 0), Number(payload.risk_score || 0));
+    duplicate.confidence = Math.max(
+      Number(duplicate.confidence || 0),
+      Number(payload.confidence || 0)
+    );
+    duplicate.risk_score = Math.max(
+      Number(duplicate.risk_score || 0),
+      Number(payload.risk_score || 0)
+    );
+
     duplicate.relatedLogs = [
       ...new Set(
-        [...(duplicate.relatedLogs || []).map((value) => value.toString()), ...payload.relatedLogs.map((value) => value.toString())]
+        [
+          ...(duplicate.relatedLogs || []).map((value) => value.toString()),
+          ...payload.relatedLogs.map((value) => value.toString()),
+        ]
       ),
     ];
+
     duplicate.recommendedAction = payload.recommendedAction;
-    duplicate.metadata = mergeAlertMetadata(duplicate.metadata || {}, payload.metadata || {});
+    duplicate.metadata = mergeAlertMetadata(
+      duplicate.metadata || {},
+      payload.metadata || {}
+    );
+
     duplicate.markModified("metadata");
+
     await duplicate.save();
     await upsertIncidentFromAlert(duplicate);
+
     emitNewAlert(duplicate._org_id, duplicate, {
       type: "updated",
       source: duplicate.source || source,
       severity: duplicate.severity || payload.severity,
     });
+
     emitDashboardUpdate(duplicate._org_id, {
       source: duplicate.source || source,
       mode: "alert-updated",
       lastAlert: duplicate,
     });
+
     return duplicate;
   }
 
@@ -428,16 +469,19 @@ const createDetectionAlert = async ({
   });
 
   await upsertIncidentFromAlert(alert);
+
   emitNewAlert(alert._org_id, alert, {
     type: "created",
     source: alert.source || source,
     severity: alert.severity || payload.severity,
   });
+
   emitDashboardUpdate(alert._org_id, {
     source: alert.source || source,
     mode: "alert-created",
     lastAlert: alert,
   });
+
   return alert;
 };
 
@@ -459,18 +503,25 @@ const buildSampleFromLog = (log) => {
     packets: getPackets(log),
     bytes: getBytes(log),
     failed_attempts: safeNumber(
-      log?.metadata?.failedAttempts ??
-        log?.metadata?.host?.failedAttempts,
+      log?.metadata?.failedAttempts ?? log?.metadata?.host?.failedAttempts,
       0
     ),
-    flow_count: safeNumber(log?.metadata?.flowCount ?? log?.metadata?.network?.flowCount, 0),
+    flow_count: safeNumber(
+      log?.metadata?.flowCount ?? log?.metadata?.network?.flowCount,
+      0
+    ),
     unique_ports: safeNumber(log?.metadata?.uniquePorts, 0),
     dns_queries: getDnsQueries(log),
-    smb_writes: safeNumber(log?.metadata?.smbWrites ?? log?.metadata?.smb_writes, 0),
+    smb_writes: safeNumber(
+      log?.metadata?.smbWrites ?? log?.metadata?.smb_writes,
+      0
+    ),
     duration: safeNumber(log?.metadata?.duration, 0),
     snort_priority: safeNumber(log?.metadata?.snort?.priority, 0),
     is_snort: isIdsSensorLog(log) ? 1 : 0,
-    timestamp: log.timestamp ? new Date(log.timestamp).toISOString() : new Date().toISOString(),
+    timestamp: log.timestamp
+      ? new Date(log.timestamp).toISOString()
+      : new Date().toISOString(),
     metadata: {
       classification: trimText(log?.metadata?.snort?.classification),
       signature_id: log?.metadata?.snort?.signatureId || null,
@@ -489,22 +540,28 @@ const rulePortScan = async (log) => {
     _org_id: log._org_id,
     $or: [
       { ip: srcIp },
+      { sourceIp: srcIp },
+      { srcIp },
       { "metadata.sourceIp": srcIp },
       { "metadata.snort.srcIp": srcIp },
       { "metadata.normalized.srcIp": srcIp },
     ],
     timestamp: { $gte: new Date(Date.now() - PORT_SCAN_WINDOW_MS) },
-  }).select("metadata");
+  }).select("metadata destinationPort destPort");
 
   const uniquePorts = new Set();
+
   recentLogs.forEach((entry) => {
     const port = safeNumber(
       entry?.metadata?.normalized?.port ??
         entry?.metadata?.destinationPort ??
         entry?.metadata?.port ??
-        entry?.metadata?.snort?.destPort,
+        entry?.metadata?.snort?.destPort ??
+        entry?.destinationPort ??
+        entry?.destPort,
       0
     );
+
     if (port > 0) uniquePorts.add(port);
   });
 
@@ -527,18 +584,28 @@ const ruleSshBruteForce = async (log) => {
   const srcIp = getSourceIp(log);
   const port = getDestinationPort(log);
   const eventType = trimText(log?.eventType).toLowerCase();
+
   const failed =
     eventType === "auth.failure" ||
     log?.metadata?.success === false ||
     log?.metadata?.host?.loginSuccess === false ||
     getMessageText(log).includes("failed");
 
-  if (!failed || (!srcIp && port !== 22 && eventType !== "auth.failure")) return null;
-  if (port !== 22 && eventType !== "auth.failure" && !getMessageText(log).includes("ssh")) return null;
+  if (!failed) return null;
+
+  if (
+    port !== 22 &&
+    eventType !== "auth.failure" &&
+    !getMessageText(log).includes("ssh")
+  ) {
+    return null;
+  }
 
   const sshSourceMatchers = isMeaningful(srcIp)
     ? [
         { ip: srcIp },
+        { sourceIp: srcIp },
+        { srcIp },
         { "metadata.sourceIp": srcIp },
         { "metadata.snort.srcIp": srcIp },
         { "metadata.normalized.srcIp": srcIp },
@@ -559,6 +626,8 @@ const ruleSshBruteForce = async (log) => {
           { "metadata.port": 22 },
           { "metadata.snort.destPort": 22 },
           { "metadata.normalized.port": 22 },
+          { destinationPort: 22 },
+          { destPort: 22 },
         ],
       },
     ],
@@ -583,11 +652,18 @@ const ruleSshBruteForce = async (log) => {
 const ruleWebBruteForce = async (log) => {
   const port = getDestinationPort(log);
   const endpoint = trimText(log?.endpoint || log?.metadata?.endpoint).toLowerCase();
-  const failedAttempts = safeNumber(log?.metadata?.failedAttempts ?? log?.metadata?.host?.failedAttempts, 0);
+  const failedAttempts = safeNumber(
+    log?.metadata?.failedAttempts ?? log?.metadata?.host?.failedAttempts,
+    0
+  );
   const requestRate = getRequestRate(log);
   const srcIp = getSourceIp(log);
 
-  const looksLikeWebAuth = [80, 443, 8080, 8443, 3000, 5000].includes(port) || endpoint.includes("login") || endpoint.includes("signin");
+  const looksLikeWebAuth =
+    [80, 443, 8080, 8443, 3000, 5000].includes(port) ||
+    endpoint.includes("login") ||
+    endpoint.includes("signin");
+
   if (!looksLikeWebAuth) return null;
 
   const recentFailureCount = await Log.countDocuments({
@@ -597,6 +673,8 @@ const ruleWebBruteForce = async (log) => {
       ? {
           $or: [
             { ip: srcIp },
+            { sourceIp: srcIp },
+            { srcIp },
             { "metadata.sourceIp": srcIp },
             { "metadata.normalized.srcIp": srcIp },
           ],
@@ -609,7 +687,9 @@ const ruleWebBruteForce = async (log) => {
     ],
   });
 
-  if (Math.max(failedAttempts, recentFailureCount) < 5 && requestRate < 60) return null;
+  if (Math.max(failedAttempts, recentFailureCount) < 5 && requestRate < 60) {
+    return null;
+  }
 
   return createDetectionAlert({
     log,
@@ -630,6 +710,7 @@ const ruleWebBruteForce = async (log) => {
 const ruleDos = async (log) => {
   const requestRate = getRequestRate(log);
   const packets = getPackets(log);
+
   if (requestRate <= 150 && packets <= 1000) return null;
 
   return createDetectionAlert({
@@ -649,6 +730,7 @@ const ruleDos = async (log) => {
 const ruleIcmpFlood = async (log) => {
   const protocol = getProtocol(log);
   const requestRate = getRequestRate(log);
+
   if (protocol !== "ICMP" || requestRate <= 80) return null;
 
   return createDetectionAlert({
@@ -670,7 +752,14 @@ const ruleDnsAbuse = async (log) => {
   const port = getDestinationPort(log);
   const dnsQueries = getDnsQueries(log);
   const requestRate = getRequestRate(log);
-  if (protocol !== "UDP" || port !== 53 || (dnsQueries < 60 && requestRate < 80)) return null;
+
+  if (
+    protocol !== "UDP" ||
+    port !== 53 ||
+    (dnsQueries < 60 && requestRate < 80)
+  ) {
+    return null;
+  }
 
   return createDetectionAlert({
     log,
@@ -689,6 +778,7 @@ const ruleDnsAbuse = async (log) => {
 
 const ruleDataExfiltration = async (log) => {
   const bytes = getBytes(log);
+
   if (bytes <= 104857600) return null;
 
   return createDetectionAlert({
@@ -709,7 +799,18 @@ const ruleSuspiciousProcess = async (log) => {
   const processName = getProcessName(log);
   const commandLine = getCommandLine(log);
   const haystack = `${processName} ${commandLine}`.toLowerCase();
-  const patterns = ["powershell", "wmic", "encodedcommand", "rundll32", "regsvr32"];
+
+  const patterns = [
+    "powershell",
+    "wmic",
+    "encodedcommand",
+    "rundll32",
+    "regsvr32",
+    "curl",
+    "wget",
+    "certutil",
+  ];
+
   if (!patterns.some((pattern) => haystack.includes(pattern))) return null;
 
   return createDetectionAlert({
@@ -729,6 +830,7 @@ const ruleSuspiciousProcess = async (log) => {
 const ruleFileIntegrityChange = async (log) => {
   const eventType = trimText(log?.eventType).toLowerCase();
   const filePath = getFilePath(log);
+
   const sensitiveMarkers = [
     "system32",
     "\\startup",
@@ -741,8 +843,13 @@ const ruleFileIntegrityChange = async (log) => {
     "cron",
   ];
 
-  if (eventType !== "file.change" && !getMessageText(log).includes("file")) return null;
-  if (!sensitiveMarkers.some((marker) => filePath.includes(marker))) return null;
+  if (eventType !== "file.change" && !getMessageText(log).includes("file")) {
+    return null;
+  }
+
+  if (!sensitiveMarkers.some((marker) => filePath.includes(marker))) {
+    return null;
+  }
 
   return createDetectionAlert({
     log,
@@ -800,12 +907,12 @@ const evaluateRuleDetections = async (log) => {
   ];
 
   const results = [];
+
   for (const rule of rules) {
     const detection = await rule(log);
-    if (detection) {
-      results.push(detection);
-    }
+    if (detection) results.push(detection);
   }
+
   return results;
 };
 
@@ -823,9 +930,7 @@ const applyIdsResults = async (logs, results = []) => {
     const eventId = log.eventId || log._id?.toString?.();
     const result = resultsByEventId.get(eventId);
 
-    if (!result) {
-      return;
-    }
+    if (!result) return;
 
     updates.push({
       updateOne: {
@@ -843,6 +948,7 @@ const applyIdsResults = async (logs, results = []) => {
               using_fallback: Boolean(result.analysis?.using_fallback),
               reason: result.analysis?.reason || null,
               submodels: result.analysis?.submodels || null,
+              raw: result.analysis || null,
             },
           },
         },
@@ -856,6 +962,7 @@ const applyIdsResults = async (logs, results = []) => {
           type: "ML Detection",
           attackType:
             result.analysis?.submodels?.random_forest?.predicted_class ||
+            result.analysis?.predicted_class ||
             (isIdsSensorLog(log) ? "ML IDS Anomaly" : "ML Behavioral Anomaly"),
           severity: normalizeSeverity(result.analysis?.severity, "Medium"),
           confidence: result.analysis?.confidence,
@@ -869,7 +976,9 @@ const applyIdsResults = async (logs, results = []) => {
             threshold: result.analysis?.threshold ?? null,
             usingFallback: Boolean(result.analysis?.using_fallback),
             predictedClass:
-              result.analysis?.submodels?.random_forest?.predicted_class || null,
+              result.analysis?.submodels?.random_forest?.predicted_class ||
+              result.analysis?.predicted_class ||
+              null,
           },
         })
       );
@@ -904,23 +1013,28 @@ const getIdsEngineHealth = async () => {
     });
 
     const data = response.data || {};
-    const normalizedStatus =
-      String(data.status || "").toLowerCase() === "ok" ? "online" : data.status || "online";
     const modelInfo = data.model && typeof data.model === "object" ? data.model : null;
 
     return {
-      status: normalizedStatus,
+      status:
+        String(data.status || "").toLowerCase() === "ok"
+          ? "online"
+          : data.status || "online",
       reachable: true,
       message: data.message || "IDS engine reachable",
       modelLoaded:
-        modelInfo && modelInfo.loaded !== undefined ? Boolean(modelInfo.loaded) : null,
+        modelInfo && modelInfo.loaded !== undefined
+          ? Boolean(modelInfo.loaded)
+          : null,
       algorithm: modelInfo?.algorithm || null,
       trainedAt: modelInfo?.trained_at || null,
       usingFallback:
         modelInfo && modelInfo.using_fallback !== undefined
           ? Boolean(modelInfo.using_fallback)
           : null,
-      featureNames: Array.isArray(modelInfo?.feature_names) ? modelInfo.feature_names : [],
+      featureNames: Array.isArray(modelInfo?.feature_names)
+        ? modelInfo.feature_names
+        : [],
       rfModel: modelInfo?.rf_model || null,
       svmModel: modelInfo?.svm_model || null,
       legacyModel: modelInfo?.legacy_model || null,
@@ -941,18 +1055,29 @@ const getIdsEngineHealth = async () => {
 };
 
 const analyzeLogs = async (logs = []) => {
-  if (logs.length === 0) {
-    return { status: "skipped", analyzed: 0, results: [], detections: 0 };
+  if (!Array.isArray(logs) || logs.length === 0) {
+    return {
+      status: "skipped",
+      analyzed: 0,
+      results: [],
+      detections: 0,
+    };
   }
 
   let detections = 0;
+
   for (const log of logs) {
     const matched = await evaluateRuleDetections(log);
     detections += matched.length;
   }
 
   if (!config.enableIdsAnalysis) {
-    return { status: "rules-only", analyzed: 0, results: [], detections };
+    return {
+      status: "rules-only",
+      analyzed: 0,
+      results: [],
+      detections,
+    };
   }
 
   const events = logs.map(buildSampleFromLog);
@@ -972,6 +1097,7 @@ const analyzeLogs = async (logs = []) => {
 
     const payload = response.data || {};
     const results = Array.isArray(payload.results) ? payload.results : [];
+
     await applyIdsResults(logs, results);
 
     return {

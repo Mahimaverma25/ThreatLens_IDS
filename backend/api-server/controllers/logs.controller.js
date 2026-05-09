@@ -2,28 +2,28 @@ const fs = require("fs/promises");
 const { parse } = require("csv-parse/sync");
 
 const Log = require("../models/Log");
-const { analyzeLogs } = require("../services/detection.service");
-const { createDetectionAlert } = require("../services/detection.service");
+
+const {
+  analyzeLogs,
+  createDetectionAlert,
+} = require("../services/detection.service");
+
 const { enqueueDetectionJob } = require("../services/detection-queue.service");
 const { publishEvent } = require("../services/event-stream.service");
-const { normalizeSecurityEvent, toSafeNumber } = require("../services/normalization.service");
+const {
+  normalizeSecurityEvent,
+  toSafeNumber,
+} = require("../services/normalization.service");
+
 const { appLogger, serializeError } = require("../utils/logger");
+
 const {
   emitDashboardUpdate,
   emitNewLog,
   emitStreamEvent,
 } = require("../services/socket.service");
 
-const clampInt = (value, fallback, min, max) => {
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) return fallback;
-  return Math.min(Math.max(parsed, min), max);
-};
-
 const MAX_SEARCH_LENGTH = 100;
-
-const escapeRegex = (value = "") =>
-  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const DATASET_REQUIRED_HEADERS = [
   "protocol_type",
@@ -33,6 +33,15 @@ const DATASET_REQUIRED_HEADERS = [
   "serror_rate",
   "label",
 ];
+
+const clampInt = (value, fallback, min, max) => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+};
+
+const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const normalizeHeader = (value = "") =>
   String(value || "")
@@ -48,32 +57,51 @@ const toNumberOrDefault = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const toOptionalText = (value, fallback = "") => {
-  const normalized = String(value ?? fallback).trim();
-  return normalized;
-};
+const toOptionalText = (value, fallback = "") =>
+  String(value ?? fallback).trim();
 
 const normalizeAttackType = (value = "") => {
   const normalized = String(value || "").trim();
   if (!normalized) return "Normal";
 
   const lower = normalized.toLowerCase();
+
   if (["normal", "benign", "0"].includes(lower)) return "Normal";
   if (lower.includes("ddos") || lower.includes("dos")) return "DDoS";
   if (lower.includes("brute")) return "Brute Force";
-  if (lower.includes("port")) return "Port Scan";
+  if (lower.includes("port") || lower.includes("scan")) return "Port Scan";
+  if (lower.includes("probe")) return "Port Scan";
+
   return normalized;
 };
 
-const toSeverityLabel = (value = "low") => {
-  const normalized = String(value || "").toLowerCase();
-  if (normalized === "critical") return "Critical";
-  if (normalized === "high") return "High";
-  if (normalized === "medium") return "Medium";
-  return "Low";
+const toSeverityLower = (value = "low") => {
+  const normalized = String(value || "low").toLowerCase();
+
+  if (["critical", "high", "medium", "low"].includes(normalized)) {
+    return normalized;
+  }
+
+  if (normalized === "error") return "high";
+  if (normalized === "warn" || normalized === "warning") return "medium";
+
+  return "low";
 };
 
-const toSeverityLower = (value = "low") => String(value || "low").toLowerCase();
+const parseJsonLine = (line) => {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+};
+
+const parsePlainTextLogs = (content = "") =>
+  content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => parseJsonLine(line) || { message: line, source: "upload" });
 
 const parseDatasetCsv = (content) => {
   const rows = parse(content, {
@@ -102,22 +130,12 @@ const parseDatasetCsv = (content) => {
       columns: true,
       skip_empty_lines: true,
       trim: true,
+      relax_column_count: true,
     });
 
     return {
       detectedHeaders,
-      invalidRows: invalidRows.concat(
-        DATASET_REQUIRED_HEADERS.filter((header) => !detectedHeaders.includes(header)).length
-          ? [
-              {
-                rowNumber: 1,
-                message: `Missing required dataset columns: ${DATASET_REQUIRED_HEADERS.filter(
-                  (header) => !detectedHeaders.includes(header)
-                ).join(", ")}`,
-              },
-            ]
-          : []
-      ),
+      invalidRows,
       items: parsedItems,
       isDatasetCsv: false,
     };
@@ -129,7 +147,7 @@ const parseDatasetCsv = (content) => {
     if (!Array.isArray(values) || values.length !== detectedHeaders.length) {
       invalidRows.push({
         rowNumber,
-        message: "Column count does not match the header row.",
+        message: "Column count does not match header row.",
       });
       return acc;
     }
@@ -144,10 +162,7 @@ const parseDatasetCsv = (content) => {
       return acc;
     }
 
-    acc.push({
-      ...row,
-      __rowNumber: rowNumber,
-    });
+    acc.push({ ...row, __rowNumber: rowNumber });
     return acc;
   }, []);
 
@@ -159,6 +174,43 @@ const parseDatasetCsv = (content) => {
   };
 };
 
+const parseUploadedItems = (file, content) => {
+  const fileName = String(file?.originalname || "").toLowerCase();
+  const mimeType = String(file?.mimetype || "").toLowerCase();
+
+  if (mimeType.includes("json") || fileName.endsWith(".json")) {
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  }
+
+  if (fileName.endsWith(".ndjson")) {
+    return content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parsed = parseJsonLine(line);
+
+        if (!parsed || typeof parsed !== "object") {
+          throw new Error("Invalid NDJSON row");
+        }
+
+        return parsed;
+      });
+  }
+
+  if (fileName.endsWith(".log") || fileName.endsWith(".txt")) {
+    return parsePlainTextLogs(content);
+  }
+
+  return parse(content, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
+  });
+};
+
 const transformDatasetRowToLog = (row, req) => {
   const protocol = toOptionalText(row.protocol_type).toUpperCase();
   const srcBytes = toNumberOrDefault(row.src_bytes, 0);
@@ -166,18 +218,22 @@ const transformDatasetRowToLog = (row, req) => {
   const requestCount = toNumberOrDefault(row.count, 0);
   const errorRate = toNumberOrDefault(row.serror_rate, 0);
   const attackType = normalizeAttackType(row.label);
+
   const failedAttempts = toNumberOrDefault(
     row.failed_logins ?? row.failed_attempts ?? row.num_failed_logins,
     0
   );
+
   const sourceIp = toOptionalText(
     row.source_ip || row.src_ip || row.srcip || row.src_host || req.ip,
     req.ip
   );
+
   const destinationIp = toOptionalText(
     row.destination_ip || row.dst_ip || row.dstip || row.dst_host,
     ""
   );
+
   const destinationPort = toSafeNumber(
     row.destination_port ??
       row.dest_port ??
@@ -187,13 +243,18 @@ const transformDatasetRowToLog = (row, req) => {
   );
 
   return {
-    message: "Network event detected",
+    message:
+      attackType === "Normal"
+        ? "Normal network traffic detected"
+        : `${attackType} traffic pattern detected`,
     source: "upload",
     eventType: "network.upload",
     protocol,
     ip: sourceIp,
+    sourceIp,
     destinationIp,
     destinationPort,
+    severity: attackType === "Normal" ? "low" : "medium",
     metadata: {
       protocol,
       sourceIp,
@@ -215,7 +276,297 @@ const transformDatasetRowToLog = (row, req) => {
   };
 };
 
-const buildPredictionFromStoredLog = ({ log, idsResult, fallbackPrediction }) => {
+const normalizeLogEntry = (item, context = {}) => {
+  let normalized = normalizeSecurityEvent(item, context);
+
+  const sensorType = String(
+    item?.sensorType ||
+      item?.metadata?.sensorType ||
+      item?.sensor_type ||
+      normalized?.metadata?.sensorType ||
+      normalized?.source ||
+      context.defaultSource ||
+      "unknown"
+  )
+    .trim()
+    .toLowerCase();
+
+  normalized = {
+    ...normalized,
+    _org_id: normalized._org_id || context.orgId,
+    _asset_id:
+      normalized._asset_id ||
+      context.assetId ||
+      item?.assetId ||
+      item?.asset_id ||
+      context.assetIdentity,
+    assetId:
+      normalized.assetId ||
+      context.assetId ||
+      item?.assetId ||
+      item?.asset_id ||
+      context.assetIdentity,
+  };
+
+  if (!normalized.timestamp) {
+    normalized.timestamp = new Date();
+  }
+
+  if (!normalized.source) {
+    normalized.source = context.defaultSource || "agent";
+  }
+
+  if (!normalized.eventType) {
+    normalized.eventType = item?.eventType || item?.event_type || "security.event";
+  }
+
+  if (!normalized.message) {
+    normalized.message =
+      item?.message ||
+      item?.metadata?.snort?.message ||
+      item?.metadata?.signature ||
+      "Security event received";
+  }
+
+  if (normalized.metadata?.destinationPort !== undefined) {
+    normalized.metadata.destinationPort = toSafeNumber(
+      normalized.metadata.destinationPort
+    );
+  }
+
+  if (normalized.metadata?.port !== undefined) {
+    normalized.metadata.port = toSafeNumber(normalized.metadata.port);
+  }
+
+  if (normalized.source === "backend" || normalized.source === "api") {
+    normalized.signature = "-";
+    normalized.classification = "-";
+    normalized.priority = "-";
+    normalized.protocol = normalized.method
+      ? normalized.method.toUpperCase()
+      : "-";
+    normalized.sourceIp = normalized.ip || "-";
+    normalized.destinationIp = "-";
+    normalized.destPort = "-";
+  }
+
+  normalized.metadata = {
+    ...(normalized.metadata || {}),
+    sensorType,
+    pipeline: normalized.metadata?.pipeline || "realtime",
+    assetId: normalized.assetId || context.assetId || null,
+    hostname: context.hostname || normalized.metadata?.hostname || null,
+  };
+
+  return normalized;
+};
+
+const buildSnortLogMatch = () => ({
+  $or: [
+    { source: "snort" },
+    { source: "suricata" },
+    { "metadata.sensorType": { $in: ["snort", "suricata"] } },
+    { "metadata.snort": { $exists: true, $ne: null } },
+  ],
+});
+
+const getBulkUpsertedIndexes = (result) => {
+  const upsertedIds =
+    result?.upsertedIds ||
+    result?.result?.upsertedIds ||
+    result?.result?.upserted ||
+    result?.upserted ||
+    [];
+
+  if (Array.isArray(upsertedIds)) {
+    return upsertedIds
+      .map((item) => Number(item?.index))
+      .filter((value) => Number.isInteger(value) && value >= 0);
+  }
+
+  return Object.keys(upsertedIds)
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0);
+};
+
+const isDuplicateOnlyBulkError = (error) =>
+  error?.code === 11000 ||
+  (Array.isArray(error?.writeErrors) &&
+    error.writeErrors.length > 0 &&
+    error.writeErrors.every((entry) => entry?.code === 11000));
+
+const emitLogsCreated = ({
+  orgId,
+  logs,
+  source,
+  duplicateCount = 0,
+  mode = "live",
+}) => {
+  if (!logs.length) return;
+
+  emitNewLog(orgId, logs[0], {
+    insertedCount: logs.length,
+    duplicateCount,
+    source,
+    mode,
+    items: logs.slice(0, 5),
+  });
+
+  emitDashboardUpdate(orgId, {
+    source,
+    mode,
+    insertedCount: logs.length,
+    duplicateCount,
+    lastLog: logs[0] || null,
+  });
+
+  emitStreamEvent(orgId, {
+    type: "telemetry.batch.persisted",
+    source,
+    mode,
+    duplicateCount,
+    insertedCount: logs.length,
+    sensorTypes: [
+      ...new Set(logs.map((log) => log?.metadata?.sensorType).filter(Boolean)),
+    ],
+    latestEvent: logs[0] || null,
+  });
+};
+
+const runDetections = async (logs) => analyzeLogs(logs);
+
+const persistLogs = async (
+  entries,
+  { orgId, source, mode, asyncDetections = false }
+) => {
+  const deduped = [];
+  const seenEventIds = new Set();
+  let duplicateCount = 0;
+
+  entries.forEach((entry) => {
+    if (!entry.message) return;
+
+    if (!entry._org_id) {
+      entry._org_id = orgId;
+    }
+
+    if (seenEventIds.has(entry.eventId)) {
+      duplicateCount += 1;
+      return;
+    }
+
+    seenEventIds.add(entry.eventId);
+    deduped.push(entry);
+  });
+
+  if (deduped.length === 0) {
+    return {
+      stored: [],
+      duplicateCount,
+      insertedCount: 0,
+      idsAnalysis: { status: "skipped", analyzed: 0 },
+    };
+  }
+
+  const operations = deduped.map((entry) => ({
+    updateOne: {
+      filter: {
+        _org_id: entry._org_id,
+        eventId: entry.eventId,
+      },
+      update: { $setOnInsert: entry },
+      upsert: true,
+    },
+  }));
+
+  let bulkResult;
+
+  try {
+    bulkResult = await Log.bulkWrite(operations, { ordered: false });
+  } catch (error) {
+    if (!isDuplicateOnlyBulkError(error)) throw error;
+    bulkResult = error.result || error;
+  }
+
+  const upsertIndexes = getBulkUpsertedIndexes(bulkResult);
+
+  const insertedEventIds = upsertIndexes
+    .map((index) => deduped[index]?.eventId)
+    .filter(Boolean);
+
+  const stored = insertedEventIds.length
+    ? await Log.find({
+        _org_id: orgId,
+        eventId: { $in: insertedEventIds },
+      }).sort({ timestamp: -1 })
+    : [];
+
+  duplicateCount += deduped.length - stored.length;
+
+  const idsAnalysis = asyncDetections
+    ? (() => {
+        const { queued, queueDepth } = enqueueDetectionJob({
+          orgId,
+          logIds: stored.map((log) => log._id),
+          onError: (error) => {
+            appLogger.error(
+              "Background detection job failed",
+              serializeError(error)
+            );
+          },
+        });
+
+        return {
+          status: queued ? "queued" : "skipped",
+          analyzed: 0,
+          results: [],
+          detections: 0,
+          queueDepth,
+        };
+      })()
+    : await runDetections(stored);
+
+  await publishEvent("telemetry.batch.persisted", {
+    organizationId: orgId?.toString?.() || orgId || null,
+    source,
+    mode,
+    insertedCount: stored.length,
+    duplicateCount,
+    sensorTypes: [
+      ...new Set(stored.map((log) => log?.metadata?.sensorType).filter(Boolean)),
+    ],
+    latestEvent: stored[0]
+      ? {
+          id: stored[0]._id?.toString?.() || null,
+          message: stored[0].message,
+          source: stored[0].source,
+          timestamp: stored[0].timestamp,
+          sensorType: stored[0]?.metadata?.sensorType || stored[0].source,
+        }
+      : null,
+  });
+
+  emitLogsCreated({
+    orgId,
+    logs: stored,
+    source,
+    duplicateCount,
+    mode,
+  });
+
+  return {
+    stored,
+    duplicateCount,
+    insertedCount: stored.length,
+    idsAnalysis,
+  };
+};
+
+const buildPredictionFromStoredLog = ({
+  log,
+  idsResult,
+  fallbackPrediction,
+}) => {
   const mlAnalysis = idsResult?.analysis || null;
   const metadata = log?.metadata || {};
   const idsMetadata = metadata.idsEngine || {};
@@ -231,28 +582,19 @@ const buildPredictionFromStoredLog = ({ log, idsResult, fallbackPrediction }) =>
     fallbackPrediction?.severity ||
     mlAnalysis?.severity ||
     idsMetadata?.severity ||
-    (predictedAttackType === "Normal" ? "Low" : "Medium");
+    (predictedAttackType === "Normal" ? "low" : "medium");
 
   return {
     id: log._id?.toString?.() || log.eventId,
-    message: fallbackPrediction?.message || log.message || "Network event detected",
+    message:
+      fallbackPrediction?.message || log.message || "Network event detected",
     protocol:
-      metadata.protocol ||
-      metadata.normalized?.protocol ||
-      log.protocol ||
-      "-",
+      metadata.protocol || metadata.normalized?.protocol || log.protocol || "-",
     severity: toSeverityLower(severity),
     attackType: predictedAttackType,
-    sourceIp:
-      metadata.sourceIp ||
-      metadata.normalized?.srcIp ||
-      log.ip ||
-      "-",
+    sourceIp: metadata.sourceIp || metadata.normalized?.srcIp || log.ip || "-",
     timestamp: log.timestamp,
-    confidence:
-      mlAnalysis?.confidence ??
-      idsMetadata?.confidence ??
-      null,
+    confidence: mlAnalysis?.confidence ?? idsMetadata?.confidence ?? null,
   };
 };
 
@@ -277,7 +619,7 @@ const deriveFallbackPrediction = async (log) => {
 
     return {
       attackType: "DDoS",
-      severity: "high",
+      severity: "critical",
       message: "Potential DDoS behavior detected from CSV telemetry",
     };
   }
@@ -329,290 +671,6 @@ const deriveFallbackPrediction = async (log) => {
   };
 };
 
-const parseJsonLine = (line) => {
-  try {
-    return JSON.parse(line);
-  } catch {
-    return null;
-  }
-};
-
-const parsePlainTextLogs = (content = "") =>
-  content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => parseJsonLine(line) || { message: line, source: "upload" });
-
-const parseUploadedItems = (file, content) => {
-  const fileName = String(file?.originalname || "").toLowerCase();
-  const mimeType = String(file?.mimetype || "").toLowerCase();
-
-  if (mimeType.includes("json") || fileName.endsWith(".json")) {
-    const parsed = JSON.parse(content);
-    return Array.isArray(parsed) ? parsed : [parsed];
-  }
-
-  if (fileName.endsWith(".ndjson")) {
-    return content
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const parsed = parseJsonLine(line);
-        if (!parsed || typeof parsed !== "object") {
-          throw new Error("Invalid NDJSON");
-        }
-        return parsed;
-      });
-  }
-
-  if (fileName.endsWith(".log") || fileName.endsWith(".txt")) {
-    return parsePlainTextLogs(content);
-  }
-
-  return parse(content, { columns: true, skip_empty_lines: true });
-};
-
-const buildSnortLogMatch = () => ({
-  $or: [
-    { source: "snort" },
-    { source: "suricata" },
-    { "metadata.sensorType": { $in: ["snort", "suricata"] } },
-    { "metadata.snort": { $exists: true, $ne: null } },
-  ],
-});
-
-const getBulkUpsertedIndexes = (result) => {
-  const upsertedIds =
-    result?.upsertedIds ||
-    result?.result?.upsertedIds ||
-    result?.result?.upserted ||
-    result?.upserted ||
-    [];
-
-  if (Array.isArray(upsertedIds)) {
-    return upsertedIds
-      .map((item) => Number(item?.index))
-      .filter((value) => Number.isInteger(value) && value >= 0);
-  }
-
-  return Object.keys(upsertedIds)
-    .map((value) => Number(value))
-    .filter((value) => Number.isInteger(value) && value >= 0);
-};
-
-const isDuplicateOnlyBulkError = (error) =>
-  error?.code === 11000 ||
-  (Array.isArray(error?.writeErrors) &&
-    error.writeErrors.length > 0 &&
-    error.writeErrors.every((entry) => entry?.code === 11000));
-
-const normalizeLogEntry = (item, context = {}) => {
-  let normalized = normalizeSecurityEvent(item, context);
-  const sensorType = String(
-    item?.sensorType ||
-      item?.metadata?.sensorType ||
-      item?.sensor_type ||
-      normalized?.metadata?.sensorType ||
-      normalized?.source ||
-      context.defaultSource ||
-      "unknown"
-  )
-    .trim()
-    .toLowerCase();
-
-  // If this is a backend/API log, ensure all table columns are present with placeholders
-  if (normalized.source === "backend" || normalized.source === "api" || normalized.endpoint) {
-    normalized = {
-      ...normalized,
-      signature: "-",
-      classification: "-",
-      priority: "-",
-      protocol: normalized.method ? normalized.method.toUpperCase() : "-",
-      sourceIp: normalized.ip || "-",
-      destinationIp: "-",
-      destPort: "-",
-      // timestamp is already present
-    };
-    // Also ensure metadata has these fields for frontend compatibility
-    normalized.metadata = {
-      ...normalized.metadata,
-      signature: "-",
-      classification: "-",
-      priority: "-",
-      protocol: normalized.method ? normalized.method.toUpperCase() : "-",
-      sourceIp: normalized.ip || "-",
-      destinationIp: "-",
-      destPort: "-",
-    };
-  }
-
-  if (normalized.metadata?.destinationPort !== undefined) {
-    normalized.metadata.destinationPort = toSafeNumber(normalized.metadata.destinationPort);
-  }
-
-  if (normalized.metadata?.port !== undefined) {
-    normalized.metadata.port = toSafeNumber(normalized.metadata.port);
-  }
-
-  normalized.metadata = {
-    ...(normalized.metadata || {}),
-    sensorType,
-    pipeline: normalized.metadata?.pipeline || "realtime",
-  };
-
-  return normalized;
-};
-
-const emitLogsCreated = ({ orgId, logs, source, duplicateCount = 0, mode = "live" }) => {
-  if (!logs.length) return;
-
-  emitNewLog(orgId, logs[0], {
-    insertedCount: logs.length,
-    duplicateCount,
-    source,
-    mode,
-    items: logs.slice(0, 5),
-  });
-
-  emitDashboardUpdate(orgId, {
-    source,
-    mode,
-    insertedCount: logs.length,
-    duplicateCount,
-    lastLog: logs[0] || null,
-  });
-
-  emitStreamEvent(orgId, {
-    type: "telemetry.batch.persisted",
-    source,
-    mode,
-    duplicateCount,
-    insertedCount: logs.length,
-    sensorTypes: [...new Set(logs.map((log) => log?.metadata?.sensorType).filter(Boolean))],
-    latestEvent: logs[0] || null,
-  });
-};
-
-const runDetections = async (logs) => analyzeLogs(logs);
-
-const persistLogs = async (entries, { orgId, source, mode, asyncDetections = false }) => {
-  const deduped = [];
-  const seenEventIds = new Set();
-  let duplicateCount = 0;
-
-  entries.forEach((entry) => {
-    if (!entry.message) return;
-
-    if (seenEventIds.has(entry.eventId)) {
-      duplicateCount += 1;
-      return;
-    }
-
-    seenEventIds.add(entry.eventId);
-    deduped.push(entry);
-  });
-
-  if (deduped.length === 0) {
-    return {
-      stored: [],
-      duplicateCount,
-      insertedCount: 0,
-      idsAnalysis: { status: "skipped", analyzed: 0 },
-    };
-  }
-
-  const operations = deduped.map((entry) => ({
-    updateOne: {
-      filter: {
-        _org_id: entry._org_id,
-        eventId: entry.eventId,
-      },
-      update: {
-        $setOnInsert: entry,
-      },
-      upsert: true,
-    },
-  }));
-
-  let bulkResult;
-
-  try {
-    bulkResult = await Log.bulkWrite(operations, { ordered: false });
-  } catch (error) {
-    if (!isDuplicateOnlyBulkError(error)) {
-      throw error;
-    }
-    bulkResult = error.result || error;
-  }
-
-  const upsertIndexes = getBulkUpsertedIndexes(bulkResult);
-  const insertedEventIds = upsertIndexes.map((index) => deduped[index]?.eventId).filter(Boolean);
-
-  const stored = insertedEventIds.length
-    ? await Log.find({
-        _org_id: orgId,
-        eventId: { $in: insertedEventIds },
-      }).sort({ timestamp: -1 })
-    : [];
-
-  duplicateCount += deduped.length - stored.length;
-
-  const idsAnalysis = asyncDetections
-    ? (() => {
-        const { queued, queueDepth } = enqueueDetectionJob({
-          orgId,
-          logIds: stored.map((log) => log._id),
-          onError: (error) => {
-            appLogger.error("Background detection job failed", serializeError(error));
-          },
-        });
-
-        return {
-          status: queued ? "queued" : "skipped",
-          analyzed: 0,
-          results: [],
-          detections: 0,
-          queueDepth,
-        };
-      })()
-    : await runDetections(stored);
-
-  await publishEvent("telemetry.batch.persisted", {
-    organizationId: orgId?.toString?.() || orgId || null,
-    source,
-    mode,
-    insertedCount: stored.length,
-    duplicateCount,
-    sensorTypes: [...new Set(stored.map((log) => log?.metadata?.sensorType).filter(Boolean))],
-    latestEvent: stored[0]
-      ? {
-          id: stored[0]._id?.toString?.() || null,
-          message: stored[0].message,
-          source: stored[0].source,
-          timestamp: stored[0].timestamp,
-          sensorType: stored[0]?.metadata?.sensorType || stored[0].source,
-        }
-      : null,
-  });
-
-  emitLogsCreated({
-    orgId,
-    logs: stored,
-    source,
-    duplicateCount,
-    mode,
-  });
-
-  return {
-    stored,
-    duplicateCount,
-    insertedCount: stored.length,
-    idsAnalysis,
-  };
-};
-
 const listLogs = async (req, res) => {
   try {
     const limit = clampInt(req.query.limit || "50", 50, 1, 200);
@@ -623,37 +681,42 @@ const listLogs = async (req, res) => {
       return res.status(400).json({ message: "Organization not found" });
     }
 
-
     const filters = { _org_id: req.orgId };
     const explicitSource = String(req.query.source || "").trim();
 
     if (req.query.level) filters.level = req.query.level;
+    if (req.query.severity) filters.severity = toSeverityLower(req.query.severity);
+    if (req.query.ip) filters.ip = req.query.ip;
+
     if (explicitSource) {
-      if (explicitSource === "snort") {
+      if (explicitSource === "snort" || explicitSource === "suricata") {
         Object.assign(filters, buildSnortLogMatch());
-      } else if (explicitSource === "upload") {
-        filters.source = "upload";
-      } else if (explicitSource === "backend") {
-        // Show logs generated by backend requests
-        filters.source = "backend";
       } else {
         filters.source = explicitSource;
       }
     }
-    if (req.query.ip) filters.ip = req.query.ip;
+
     if (req.query.protocol) {
-      filters.$or = [
-        { "metadata.protocol": req.query.protocol },
-        { "metadata.appProtocol": req.query.protocol },
-        { "metadata.snort.protocol": req.query.protocol },
-      ];
+      filters.$and = filters.$and || [];
+      filters.$and.push({
+        $or: [
+          { protocol: req.query.protocol },
+          { "metadata.protocol": req.query.protocol },
+          { "metadata.appProtocol": req.query.protocol },
+          { "metadata.snort.protocol": req.query.protocol },
+        ],
+      });
     }
+
     if (req.query.destinationPort) {
       const destinationPort = Number.parseInt(req.query.destinationPort, 10);
+
       if (!Number.isNaN(destinationPort)) {
         filters.$and = filters.$and || [];
         filters.$and.push({
           $or: [
+            { destinationPort },
+            { destPort: destinationPort },
             { "metadata.destinationPort": destinationPort },
             { "metadata.port": destinationPort },
             { "metadata.snort.destPort": destinationPort },
@@ -663,22 +726,28 @@ const listLogs = async (req, res) => {
     }
 
     const rawSearch = String(req.query.search || "").trim();
+
     if (rawSearch.length > MAX_SEARCH_LENGTH) {
       return res.status(400).json({ message: "Search term too long" });
     }
 
     if (rawSearch) {
       const safeSearch = escapeRegex(rawSearch);
-      const searchFilters = [
-        { message: { $regex: safeSearch, $options: "i" } },
-        { eventType: { $regex: safeSearch, $options: "i" } },
-        { "metadata.protocol": { $regex: safeSearch, $options: "i" } },
-        { "metadata.appProtocol": { $regex: safeSearch, $options: "i" } },
-        { "metadata.snort.classification": { $regex: safeSearch, $options: "i" } },
-      ];
 
       filters.$and = filters.$and || [];
-      filters.$and.push({ $or: searchFilters });
+      filters.$and.push({
+        $or: [
+          { message: { $regex: safeSearch, $options: "i" } },
+          { eventType: { $regex: safeSearch, $options: "i" } },
+          { source: { $regex: safeSearch, $options: "i" } },
+          { ip: { $regex: safeSearch, $options: "i" } },
+          { srcIp: { $regex: safeSearch, $options: "i" } },
+          { sourceIp: { $regex: safeSearch, $options: "i" } },
+          { "metadata.protocol": { $regex: safeSearch, $options: "i" } },
+          { "metadata.snort.classification": { $regex: safeSearch, $options: "i" } },
+          { "metadata.snort.message": { $regex: safeSearch, $options: "i" } },
+        ],
+      });
     }
 
     const [logs, total] = await Promise.all([
@@ -687,6 +756,7 @@ const listLogs = async (req, res) => {
     ]);
 
     return res.json({
+      success: true,
       data: logs,
       pagination: { total, page, limit },
     });
@@ -712,7 +782,7 @@ const createLog = async (req, res) => {
       defaultSource: "frontend",
     });
 
-    normalized.userId = req.user?.sub;
+    normalized.userId = req.user?.sub || req.user?._id || req.user?.id;
 
     const result = await persistLogs([normalized], {
       orgId: req.orgId,
@@ -721,6 +791,7 @@ const createLog = async (req, res) => {
     });
 
     return res.status(201).json({
+      success: true,
       data: result.stored[0] || null,
       meta: {
         insertedCount: result.insertedCount,
@@ -737,7 +808,7 @@ const createLog = async (req, res) => {
 const ingestLogs = async (req, res) => {
   try {
     if (!req.orgId || !req.assetId) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res.status(401).json({ message: "Unauthorized agent ingest" });
     }
 
     const inputLogs = Array.isArray(req.body?.logs) ? req.body.logs : [];
@@ -770,9 +841,12 @@ const ingestLogs = async (req, res) => {
     return res.status(201).json({
       success: true,
       inserted: result.insertedCount,
+      insertedCount: result.insertedCount,
       duplicates: result.duplicateCount,
+      duplicateCount: result.duplicateCount,
       idsAnalysis: result.idsAnalysis.status,
       idsAnalyzed: result.idsAnalysis.analyzed || 0,
+      queueDepth: result.idsAnalysis.queueDepth || 0,
     });
   } catch (error) {
     appLogger.error("Failed to ingest logs", serializeError(error));
@@ -793,7 +867,9 @@ const uploadLogs = async (req, res) => {
     }
 
     uploadedFilePath = req.file.path || "";
+
     const content = await fs.readFile(uploadedFilePath, "utf8");
+
     let items = [];
     let detectedHeaders = [];
     let invalidRows = [];
@@ -811,9 +887,10 @@ const uploadLogs = async (req, res) => {
       } else {
         items = parseUploadedItems(req.file, content);
       }
-    } catch (parseError) {
+    } catch {
       return res.status(400).json({
-        message: "Invalid file format. Supported formats: CSV, JSON, NDJSON, LOG, TXT",
+        message:
+          "Invalid file format. Supported formats: CSV, JSON, NDJSON, LOG, TXT",
       });
     }
 
@@ -824,8 +901,6 @@ const uploadLogs = async (req, res) => {
 
         return normalizeLogEntry(inputItem, {
           orgId: req.orgId,
-          assetIdentity: req.asset?.asset_id,
-          hostname: req.asset?.hostname,
           ip: req.ip,
           defaultSource: "upload",
         });
@@ -853,14 +928,19 @@ const uploadLogs = async (req, res) => {
     );
 
     const predictions = [];
+
     const shouldUseFallbackRules =
       isDatasetCsv &&
       (!result.idsAnalysis ||
         result.idsAnalysis.status === "offline" ||
-        result.idsAnalysis.status === "rules-only");
+        result.idsAnalysis.status === "rules-only" ||
+        result.idsAnalysis.status === "skipped");
 
     for (const storedLog of result.stored) {
-      const idsResult = idsResultsByEventId.get(storedLog.eventId || storedLog._id?.toString?.());
+      const idsResult = idsResultsByEventId.get(
+        storedLog.eventId || storedLog._id?.toString?.()
+      );
+
       const fallbackPrediction = shouldUseFallbackRules
         ? await deriveFallbackPrediction(storedLog)
         : null;
@@ -875,6 +955,7 @@ const uploadLogs = async (req, res) => {
     }
 
     return res.status(201).json({
+      success: true,
       data: result.stored,
       predictions,
       meta: {
@@ -889,6 +970,7 @@ const uploadLogs = async (req, res) => {
     });
   } catch (error) {
     appLogger.error("Failed to upload logs", serializeError(error));
+
     return res.status(500).json({
       message:
         error?.message?.includes("Unsupported file type") ||

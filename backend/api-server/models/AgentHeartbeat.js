@@ -8,58 +8,83 @@ const AgentHeartbeatSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+
     _asset_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Asset",
       required: true,
       index: true,
     },
+
     agent_type: {
       type: String,
       enum: ["nids", "hids", "hybrid", "unknown"],
-      default: "hids",
+      default: "unknown",
       index: true,
     },
+
     asset_id: {
       type: String,
       trim: true,
       index: true,
+      default: "",
     },
+
     hostname: {
       type: String,
       trim: true,
       default: "",
     },
+
     host_platform: {
       type: String,
       trim: true,
       default: "",
     },
+
     agent_version: {
       type: String,
       trim: true,
       default: "",
     },
-    telemetry_types: [{ type: String, trim: true }],
+
+    telemetry_types: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+
     queue_depth: {
       type: Number,
       default: 0,
+      min: 0,
     },
+
     status: {
       type: String,
       enum: ["online", "offline", "error", "degraded"],
       default: "online",
       index: true,
     },
+
     ip: {
       type: String,
       trim: true,
       default: "",
     },
+
+    last_error: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     metadata: {
       type: Object,
       default: {},
     },
+
     receivedAt: {
       type: Date,
       default: Date.now,
@@ -67,10 +92,16 @@ const AgentHeartbeatSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true,
+    timestamps: {
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+    },
   }
 );
 
 AgentHeartbeatSchema.index({ _org_id: 1, _asset_id: 1, receivedAt: -1 });
+AgentHeartbeatSchema.index({ _org_id: 1, status: 1, receivedAt: -1 });
+AgentHeartbeatSchema.index({ _org_id: 1, agent_type: 1, receivedAt: -1 });
+AgentHeartbeatSchema.index({ asset_id: 1, receivedAt: -1 });
 
 module.exports = mongoose.model("AgentHeartbeat", AgentHeartbeatSchema);
