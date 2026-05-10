@@ -25,18 +25,12 @@ const OPTIONAL_HEADERS = [
   "destination_port",
 ];
 
-const SUPPORTED_UPLOAD_EXTENSIONS = [
-  ".csv",
-  ".json",
-  ".ndjson",
-  ".log",
-  ".txt",
-];
+const SUPPORTED_UPLOAD_EXTENSIONS = [".csv", ".json", ".ndjson", ".log", ".txt"];
 const MAX_UPLOAD_FILE_SIZE = 100 * 1024 * 1024;
 
 const isSupportedUploadFile = (fileName = "") =>
   SUPPORTED_UPLOAD_EXTENSIONS.some((extension) =>
-    String(fileName).toLowerCase().endsWith(extension),
+    String(fileName).toLowerCase().endsWith(extension)
   );
 
 const splitCsvLine = (line) => {
@@ -98,7 +92,7 @@ const readCsvValidation = async (file) => {
   let validRows = 0;
 
   const missingHeaders = EXPECTED_HEADERS.filter(
-    (header) => !detectedHeaders.includes(header),
+    (header) => !detectedHeaders.includes(header)
   );
 
   if (missingHeaders.length) {
@@ -126,18 +120,12 @@ const readCsvValidation = async (file) => {
     }, {});
 
     if (!String(row.protocol_type || "").trim()) {
-      invalidRows.push({
-        rowNumber,
-        message: "protocol_type is required.",
-      });
+      invalidRows.push({ rowNumber, message: "protocol_type is required." });
       return;
     }
 
     if (!String(row.label || "").trim()) {
-      invalidRows.push({
-        rowNumber,
-        message: "label is required.",
-      });
+      invalidRows.push({ rowNumber, message: "label is required." });
       return;
     }
 
@@ -156,16 +144,14 @@ const resolveUploadedRows = (payload) => {
 };
 
 const resolveDetectedHeaders = (payload) => {
-  if (Array.isArray(payload?.meta?.detectedHeaders))
-    return payload.meta.detectedHeaders;
+  if (Array.isArray(payload?.meta?.detectedHeaders)) return payload.meta.detectedHeaders;
   return [];
 };
 
 const resolveInvalidRows = (payload) => {
   if (Array.isArray(payload?.invalidRows)) return payload.invalidRows;
   if (Array.isArray(payload?.errors)) return payload.errors;
-  if (Array.isArray(payload?.meta?.invalidRows))
-    return payload.meta.invalidRows;
+  if (Array.isArray(payload?.meta?.invalidRows)) return payload.meta.invalidRows;
   return [];
 };
 
@@ -189,10 +175,12 @@ const Upload = () => {
 
   const predictionRows = useMemo(() => resolveUploadedRows(result), [result]);
   const uploadErrors = useMemo(() => resolveInvalidRows(result), [result]);
+
   const detectedHeaders = useMemo(() => {
     if (validation.detectedHeaders.length) return validation.detectedHeaders;
     return resolveDetectedHeaders(result);
   }, [result, validation.detectedHeaders]);
+
   const hasUploadResult = Boolean(result);
   const isCsvFile = file ? file.name.toLowerCase().endsWith(".csv") : false;
 
@@ -220,11 +208,7 @@ const Upload = () => {
         const nextValidation = await readCsvValidation(nextFile);
         setValidation(nextValidation);
       } else {
-        setValidation({
-          validRows: 0,
-          invalidRows: [],
-          detectedHeaders: [],
-        });
+        setValidation({ validRows: 0, invalidRows: [], detectedHeaders: [] });
       }
     } catch (err) {
       console.error("Upload validation error:", err);
@@ -244,14 +228,12 @@ const Upload = () => {
       setError("");
       setResult(null);
       setProgress(20);
-      setProcessingText("Loading and processing...");
+      setProcessingText("Preparing telemetry file...");
 
       const timerOne = setTimeout(() => {
         setProgress(55);
         setProcessingText(
-          isCsvFile
-            ? "Validating CSV traffic rows..."
-            : "Validating uploaded log entries...",
+          isCsvFile ? "Validating CSV traffic rows..." : "Validating uploaded log entries..."
         );
       }, 350);
 
@@ -282,7 +264,7 @@ const Upload = () => {
       console.error("CSV upload error:", err);
       setProgress(0);
       setProcessingText("");
-      setError(err?.response?.data?.message || "Failed to analyze CSV.");
+      setError(err?.response?.data?.message || "Failed to analyze uploaded file.");
     } finally {
       setUploading(false);
     }
@@ -311,408 +293,428 @@ const Upload = () => {
     if (inputRef.current) inputRef.current.value = "";
   };
 
+  const invalidCount = isCsvFile
+    ? [...validation.invalidRows, ...uploadErrors].length
+    : uploadErrors.length || 0;
+
   return (
     <MainLayout>
       <style>{`
         .upload-page {
-          padding: 34px;
-          min-height: calc(100vh - 80px);
-          background:
-            radial-gradient(circle at top left, rgba(14, 165, 233, 0.1), transparent 30%),
-            radial-gradient(circle at top right, rgba(249, 115, 22, 0.12), transparent 26%),
-            linear-gradient(135deg, #07111f 0%, #0b1728 50%, #0a1422 100%);
+          display: grid;
+          gap: 24px;
         }
 
-        .upload-shell {
-          max-width: 1180px;
-          margin: 0 auto;
-        }
-
-        .upload-topbar {
+        .upload-header {
           display: flex;
-          align-items: center;
           justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 26px;
+          gap: 18px;
+          align-items: center;
         }
 
-        .upload-title h1 {
+        .upload-header h1 {
           margin: 0;
-          font-size: 32px;
-          color: #f3f7ff;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          letter-spacing: -0.5px;
+          color: #f8fbff;
+          font-size: 2rem;
         }
 
-        .upload-title p {
+        .upload-header p {
           margin: 8px 0 0;
+          max-width: 900px;
           color: #9bb0cb;
-          font-size: 15px;
         }
 
-        .upload-top-actions {
+        .upload-actions {
           display: flex;
-          align-items: center;
-          gap: 14px;
+          gap: 12px;
           flex-wrap: wrap;
         }
 
-        .link-action {
-          border: 0;
-          background: transparent;
-          color: #8fe7ff;
-          font-weight: 800;
+        .upload-action-btn {
+          min-height: 46px;
+          padding: 0 22px;
+          border: none;
+          border-radius: 12px;
+          background: linear-gradient(135deg, #ff7a18, #e85500);
+          color: #ffffff;
+          font-weight: 900;
           cursor: pointer;
-          font-size: 14px;
+        }
+
+        .upload-summary-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 16px;
+        }
+
+        .upload-summary-grid div {
+          padding: 22px;
+          border-radius: 18px;
+          background: rgba(8, 17, 31, 0.84);
+          border: 1px solid rgba(148, 163, 184, 0.12);
+          box-shadow: 0 14px 30px rgba(2, 6, 18, 0.18);
+        }
+
+        .upload-summary-grid span {
+          display: block;
+          color: #9bb0cb;
+          font-size: 0.85rem;
+        }
+
+        .upload-summary-grid strong {
+          display: block;
+          margin-top: 10px;
+          color: #f8fbff;
+          font-size: 1.7rem;
+        }
+
+        .upload-panel,
+        .upload-result-panel {
+          overflow: hidden;
+          border-radius: 20px;
+          background: #ffffff;
+          box-shadow: 0 18px 34px rgba(2, 6, 18, 0.16);
+        }
+
+        .upload-panel-title {
+          min-height: 64px;
+          padding: 0 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          background: linear-gradient(135deg, #ff7a18, #e85500);
+          color: #ffffff;
+          font-weight: 900;
+          font-size: 1.12rem;
+        }
+
+        .upload-panel-title h3 {
+          margin: 0;
+          color: #ffffff;
+        }
+
+        .upload-panel-title span {
+          padding: 8px 14px;
+          border-radius: 999px;
+          background: #2563eb;
+          color: #ffffff;
+          font-size: 0.84rem;
+          white-space: nowrap;
         }
 
         .upload-layout {
           display: grid;
-          grid-template-columns: minmax(0, 2fr) minmax(300px, 0.95fr);
+          grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
           gap: 24px;
           align-items: start;
         }
 
-        .upload-card {
-          background: rgba(9, 18, 33, 0.92);
-          border-radius: 18px;
-          box-shadow: 0 18px 45px rgba(0, 0, 0, 0.24);
-          border: 1px solid rgba(148, 163, 184, 0.12);
-          overflow: hidden;
-        }
-
-        .upload-card-header {
-          background: linear-gradient(90deg, #ff9b2f, #f07b1f);
-          padding: 17px 22px;
-          color: #08111f;
-          font-size: 17px;
-          font-weight: 900;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .upload-card-body {
-          padding: 26px;
-        }
-
-        .dropzone {
-          min-height: 278px;
-          border: 2px dashed rgba(93, 223, 255, 0.45);
-          border-radius: 16px;
-          background:
-            radial-gradient(circle at top, rgba(93, 223, 255, 0.12), transparent 35%),
-            linear-gradient(135deg, rgba(12, 24, 42, 0.96), rgba(9, 19, 35, 0.96));
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          cursor: pointer;
-          transition: 0.25s ease;
+        .upload-panel-body {
           padding: 28px;
         }
 
-        .dropzone:hover,
-        .dropzone.active {
-          transform: translateY(-2px);
-          border-color: #5ddfff;
-          box-shadow: inset 0 0 0 999px rgba(93, 223, 255, 0.04);
+        .upload-dropzone {
+          min-height: 310px;
+          border: 2px dashed #fb923c;
+          border-radius: 18px;
+          background: linear-gradient(135deg, #fff7ed, #f8fafc);
+          display: grid;
+          place-items: center;
+          text-align: center;
+          cursor: pointer;
+          padding: 30px;
+          transition: 0.2s ease;
         }
 
-        .dropzone-icon {
-          font-size: 46px;
-          margin-bottom: 10px;
-          color: #5ddfff;
+        .upload-dropzone:hover,
+        .upload-dropzone.active {
+          transform: translateY(-2px);
+          border-color: #ea580c;
+          box-shadow: 0 16px 30px rgba(234, 88, 12, 0.14);
+        }
+
+        .upload-dropzone-icon {
+          width: 76px;
+          height: 76px;
+          margin: 0 auto 16px;
+          display: grid;
+          place-items: center;
+          border-radius: 22px;
+          background: linear-gradient(135deg, #ff7a18, #e85500);
+          color: #ffffff;
           font-weight: 900;
           letter-spacing: 0.08em;
         }
 
-        .dropzone h2 {
+        .upload-dropzone h2 {
           margin: 0;
-          color: #f3f7ff;
-          font-size: 22px;
-          font-weight: 900;
+          color: #1f2937;
+          font-size: 1.45rem;
         }
 
-        .dropzone p {
-          margin: 8px 0 16px;
-          color: #9bb0cb;
+        .upload-dropzone p {
+          margin: 10px 0 18px;
+          color: #64748b;
         }
 
-        .dropzone-badges {
+        .upload-badge-row {
           display: flex;
           justify-content: center;
           gap: 8px;
           flex-wrap: wrap;
         }
 
-        .dropzone-badges span {
-          background: rgba(21, 40, 66, 0.92);
-          color: #dcecff;
-          padding: 7px 13px;
+        .upload-badge-row span {
+          display: inline-flex;
+          align-items: center;
+          min-height: 32px;
+          padding: 0 13px;
           border-radius: 999px;
-          font-size: 12px;
+          background: #e0f2fe;
+          color: #075985;
+          font-size: 0.78rem;
           font-weight: 900;
-          border: 1px solid rgba(148, 163, 184, 0.12);
-          box-shadow: 0 8px 16px rgba(0, 0, 0, 0.18);
         }
 
         .hidden-input {
           display: none;
         }
 
-        .selected-file-card {
-          margin-top: 16px;
-          background:
-            radial-gradient(circle at top right, rgba(255, 155, 47, 0.12), transparent 34%),
-            radial-gradient(circle at bottom left, rgba(93, 223, 255, 0.12), transparent 32%),
-            linear-gradient(135deg, rgba(10, 20, 36, 0.96), rgba(13, 27, 48, 0.94));
-          border-radius: 14px;
-          padding: 16px 18px;
+        .upload-selected-file {
+          margin-top: 18px;
+          padding: 18px;
+          border-radius: 16px;
+          background: #f8fafc;
+          border: 1px solid #e5e7eb;
           display: flex;
-          align-items: center;
           justify-content: space-between;
           gap: 16px;
-          border: 1px solid rgba(93, 223, 255, 0.18);
-          box-shadow: 0 12px 28px rgba(2, 6, 18, 0.24);
+          align-items: center;
         }
 
-        .selected-file-card strong {
+        .upload-selected-file strong {
           display: block;
-          color: #f8fbff;
-          font-size: 15px;
+          color: #111827;
           margin-bottom: 5px;
         }
 
-        .selected-file-card span {
-          color: #9fb4d2;
-          font-size: 13px;
+        .upload-selected-file span {
+          color: #64748b;
+          font-size: 0.86rem;
         }
 
-        .clear-link {
-          border: 0;
-          background: transparent;
-          color: #ffbe78;
-          cursor: pointer;
+        .upload-clear-btn {
+          border: none;
+          border-radius: 999px;
+          padding: 9px 14px;
+          background: #fee2e2;
+          color: #991b1b;
           font-weight: 900;
-          white-space: nowrap;
+          cursor: pointer;
         }
 
-        .clear-link:hover {
-          color: #ffd166;
+        .upload-progress {
+          margin-top: 18px;
         }
 
-        .progress-wrap {
-          margin-top: 14px;
-        }
-
-        .progress-track {
+        .upload-progress-track {
           height: 16px;
           border-radius: 999px;
-          background: rgba(20, 36, 60, 0.92);
+          background: #e5e7eb;
           overflow: hidden;
         }
 
-        .progress-fill {
+        .upload-progress-fill {
           height: 100%;
-          background: linear-gradient(90deg, #5ddfff, #2f7df6);
-          color: #08111f;
-          font-size: 11px;
+          border-radius: inherit;
+          background: linear-gradient(135deg, #2563eb, #0ea5e9);
+          color: #ffffff;
+          font-size: 0.72rem;
           font-weight: 900;
-          text-align: center;
           line-height: 16px;
-          transition: width 0.35s ease;
+          text-align: center;
+          transition: width 0.3s ease;
         }
 
-        .progress-wrap p {
+        .upload-progress p {
           margin: 9px 0 0;
-          color: #9bb0cb;
-          font-size: 13px;
+          color: #64748b;
+          font-weight: 700;
         }
 
         .upload-controls {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 18px;
-          margin-top: 20px;
-        }
-
-        .control-group label {
-          display: block;
-          margin-bottom: 8px;
-          font-weight: 900;
-          color: #dcecff;
-          font-size: 14px;
-        }
-
-        .control-group select {
-          width: 100%;
-          height: 46px;
-          border-radius: 10px;
-          border: 1px solid rgba(148, 163, 184, 0.18);
-          padding: 0 14px;
-          color: #dcecff;
-          background: rgba(7, 15, 29, 0.9);
-          outline: none;
-        }
-
-        .primary-action {
-          width: 100%;
           margin-top: 22px;
-          border: 0;
+        }
+
+        .upload-control-group {
+          display: grid;
+          gap: 8px;
+        }
+
+        .upload-control-group label {
+          color: #374151;
+          font-weight: 900;
+          font-size: 0.86rem;
+        }
+
+        .upload-control-group select {
+          min-height: 48px;
+          padding: 0 14px;
+          border-radius: 10px;
+          border: 1px solid #e5e7eb;
+          background: #ffffff;
+          color: #111827;
+          font-weight: 700;
+        }
+
+        .upload-primary-btn {
+          width: 100%;
+          min-height: 52px;
+          margin-top: 22px;
+          border: none;
           border-radius: 12px;
-          padding: 16px 20px;
-          font-size: 17px;
+          background: linear-gradient(135deg, #ff7a18, #e85500);
+          color: #ffffff;
+          font-size: 1rem;
           font-weight: 900;
           cursor: pointer;
-          color: #08111f;
-          background: linear-gradient(90deg, #ff9b2f, #f07b1f);
-          box-shadow: 0 12px 26px rgba(234, 88, 12, 0.22);
-          transition: 0.2s ease;
         }
 
-        .primary-action:hover:not(:disabled) {
-          transform: translateY(-1px);
-          box-shadow: 0 16px 34px rgba(234, 88, 12, 0.28);
-        }
-
-        .primary-action:disabled {
-          opacity: 0.55;
+        .upload-primary-btn:disabled {
+          opacity: 0.5;
           cursor: not-allowed;
         }
 
-        .requirements-list {
+        .upload-requirements {
           display: grid;
-          gap: 12px;
+          gap: 14px;
         }
 
-        .requirement-item {
-          border-left: 4px solid #5ddfff;
-          padding: 14px 16px;
-          background: linear-gradient(90deg, rgba(13, 27, 48, 0.92), rgba(9, 19, 35, 0.92));
-          border-radius: 10px;
-          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
-        }
-
-        .requirement-item strong {
-          display: block;
-          color: #f3f7ff;
-          font-size: 15px;
-          margin-bottom: 4px;
-        }
-
-        .requirement-item span {
-          color: #9bb0cb;
-          font-size: 13px;
-          line-height: 1.5;
-        }
-
-        .tip-box {
-          margin-top: 18px;
-          background: rgba(12, 24, 42, 0.94);
-          border-left: 4px solid #ff9b2f;
+        .upload-requirement-item {
           padding: 16px;
-          border-radius: 12px;
-          color: #c8d8ee;
-          font-weight: 700;
+          border-radius: 14px;
+          background: #f8fafc;
+          border-left: 5px solid #ff7a18;
+        }
+
+        .upload-requirement-item strong {
+          display: block;
+          color: #1f2937;
+          margin-bottom: 5px;
+        }
+
+        .upload-requirement-item span {
+          color: #64748b;
+          line-height: 1.5;
+          font-size: 0.88rem;
+        }
+
+        .upload-tip-box {
+          margin-top: 18px;
+          padding: 16px;
+          border-radius: 14px;
+          background: #eff6ff;
+          border: 1px solid #bfdbfe;
+          color: #1e3a8a;
+          font-weight: 800;
           line-height: 1.5;
         }
 
-        .upload-stats {
+        .upload-stats-grid {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 16px;
-          margin-top: 24px;
         }
 
-        .stat-box {
-          background: rgba(9, 18, 33, 0.92);
-          border-radius: 14px;
-          padding: 18px;
-          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
-          border: 1px solid rgba(148, 163, 184, 0.12);
-        }
-
-        .stat-box span {
-          display: block;
-          color: #9bb0cb;
-          font-size: 13px;
-          font-weight: 900;
-        }
-
-        .stat-box strong {
-          display: block;
-          margin-top: 8px;
-          color: #f3f7ff;
-          font-size: 24px;
-        }
-
-        .result-card {
-          margin-top: 24px;
-          background: rgba(9, 18, 33, 0.92);
+        .upload-stats-grid div {
+          padding: 20px;
           border-radius: 16px;
-          padding: 22px;
-          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+          background: rgba(8, 17, 31, 0.84);
           border: 1px solid rgba(148, 163, 184, 0.12);
         }
 
-        .result-card h2 {
-          margin: 0 0 6px;
-          color: #f3f7ff;
-        }
-
-        .result-card p {
-          margin: 0 0 16px;
+        .upload-stats-grid span {
+          display: block;
           color: #9bb0cb;
-        }
-
-        .table-wrap {
-          overflow-x: auto;
-        }
-
-        .result-table {
-          width: 100%;
-          border-collapse: collapse;
-          min-width: 720px;
-        }
-
-        .result-table th {
-          text-align: left;
-          background: rgba(12, 25, 45, 0.94);
-          color: #8fe7ff;
-          padding: 12px;
-          font-size: 13px;
-        }
-
-        .result-table td {
-          padding: 12px;
-          border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-          color: #dcecff;
-          font-size: 14px;
-        }
-
-        .empty-box {
-          border: 1px dashed rgba(93, 223, 255, 0.28);
-          background: rgba(12, 24, 42, 0.76);
-          border-radius: 14px;
-          padding: 24px;
-          text-align: center;
-          color: #9bb0cb;
-        }
-
-        .error-box {
-          background: rgba(75, 17, 27, 0.88);
-          color: #ffb1bd;
-          border: 1px solid rgba(255, 107, 129, 0.24);
-          border-radius: 12px;
-          padding: 14px 16px;
-          margin-bottom: 18px;
+          font-size: 0.84rem;
           font-weight: 800;
         }
 
-        .error-list {
+        .upload-stats-grid strong {
+          display: block;
+          margin-top: 8px;
+          color: #f8fbff;
+          font-size: 1.8rem;
+        }
+
+        .upload-result-body {
+          padding: 28px;
+        }
+
+        .upload-table-wrap {
+          overflow-x: auto;
+        }
+
+        .upload-result-table {
+          width: 100%;
+          min-width: 980px;
+          border-collapse: collapse;
+        }
+
+        .upload-result-table th {
+          padding: 18px;
+          text-align: left;
+          background: linear-gradient(135deg, #fb923c, #ea580c);
+          color: #ffffff;
+          font-size: 0.86rem;
+        }
+
+        .upload-result-table td {
+          padding: 18px;
+          border-bottom: 1px solid #f1f5f9;
+          color: #374151;
+          font-weight: 700;
+          vertical-align: top;
+        }
+
+        .upload-pill {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 30px;
+          padding: 0 12px;
+          border-radius: 999px;
+          font-size: 0.78rem;
+          font-weight: 900;
+          text-transform: uppercase;
+          background: #e0f2fe;
+          color: #075985;
+        }
+
+        .upload-empty-box {
+          padding: 30px;
+          text-align: center;
+          border-radius: 16px;
+          background: #f8fafc;
+          color: #64748b;
+          font-weight: 800;
+          border: 1px dashed #cbd5e1;
+        }
+
+        .upload-error-box {
+          padding: 14px 16px;
+          border-radius: 14px;
+          background: #fee2e2;
+          color: #991b1b;
+          font-weight: 900;
+          border: 1px solid #fecaca;
+        }
+
+        .upload-error-list {
           display: grid;
           gap: 10px;
           margin: 0;
@@ -720,299 +722,279 @@ const Upload = () => {
           list-style: none;
         }
 
-        .error-list li {
-          background: rgba(38, 19, 7, 0.92);
-          border-left: 4px solid #ff9b2f;
-          padding: 12px 14px;
-          border-radius: 10px;
-          color: #f6dac0;
+        .upload-error-list li {
+          padding: 14px;
+          border-radius: 12px;
+          background: #fff7ed;
+          border-left: 5px solid #ea580c;
+          color: #7c2d12;
+          font-weight: 700;
         }
 
-        @media (max-width: 980px) {
-          .upload-page {
-            padding: 22px;
-          }
-
+        @media (max-width: 1100px) {
           .upload-layout {
             grid-template-columns: 1fr;
           }
 
-          .upload-stats {
+          .upload-summary-grid,
+          .upload-stats-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
 
-        @media (max-width: 620px) {
-          .upload-page {
-            padding: 16px;
-          }
-
-          .upload-topbar {
-            align-items: flex-start;
-            flex-direction: column;
-          }
-
-          .upload-title h1 {
-            font-size: 26px;
-          }
-
-          .upload-card-body {
-            padding: 18px;
-          }
-
-          .dropzone {
-            min-height: 230px;
-            padding: 20px;
-          }
-
-          .dropzone h2 {
-            font-size: 18px;
-          }
-
-          .selected-file-card {
+        @media (max-width: 700px) {
+          .upload-header {
             flex-direction: column;
             align-items: flex-start;
           }
 
-          .upload-controls,
-          .upload-stats {
+          .upload-actions,
+          .upload-action-btn {
+            width: 100%;
+          }
+
+          .upload-summary-grid,
+          .upload-stats-grid,
+          .upload-controls {
             grid-template-columns: 1fr;
+          }
+
+          .upload-selected-file {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .upload-panel-title {
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 18px 24px;
           }
         }
       `}</style>
 
-      <div className="upload-page">
-        <div className="upload-shell">
-          <div className="upload-topbar">
-            <div className="upload-title">
-              <h1>Upload CSV</h1>
-              <p>
-                Upload telemetry datasets, validate structured IDS fields, and
-                process events through the ThreatLens detection pipeline.
-              </p>
+      <section className="upload-page">
+        <div className="upload-header">
+          <div>
+            <div className="command-eyebrow">THREATLENS / TELEMETRY INGESTION / OFFLINE ANALYSIS</div>
+            <h1>Upload Telemetry</h1>
+            <p>
+              Upload IDS datasets, Snort logs, or host-agent telemetry files for validation,
+              offline analysis, and alert generation.
+            </p>
+          </div>
+
+          <div className="upload-actions">
+            <button type="button" className="upload-action-btn" onClick={downloadSample}>
+              Download Sample CSV
+            </button>
+          </div>
+        </div>
+
+        {error && <div className="upload-error-box">{error}</div>}
+
+        <section className="upload-summary-grid">
+          <div>
+            <span>Supported Files</span>
+            <strong>CSV / LOG</strong>
+          </div>
+          <div>
+            <span>Maximum Size</span>
+            <strong>100 MB</strong>
+          </div>
+          <div>
+            <span>Detection Mode</span>
+            <strong>{predictionType}</strong>
+          </div>
+          <div>
+            <span>Processing Status</span>
+            <strong>{uploading ? "Running" : hasUploadResult ? "Done" : "Ready"}</strong>
+          </div>
+        </section>
+
+        <div className="upload-layout">
+          <section className="upload-panel">
+            <div className="upload-panel-title">
+              <h3>▦ Upload Telemetry File</h3>
+              <span>{file ? "File selected" : "Awaiting file"}</span>
             </div>
 
-            <div className="upload-top-actions">
-              <button type="button" className="link-action">
-                CSV Format
-              </button>
+            <div className="upload-panel-body">
+              <div
+                className={`upload-dropzone ${dragActive ? "active" : ""}`}
+                onClick={() => inputRef.current?.click()}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                  handleSelectedFile(e.dataTransfer.files?.[0]);
+                }}
+              >
+                <div>
+                  <div className="upload-dropzone-icon">{file ? "FILE" : "LOG"}</div>
+                  <h2>{file ? file.name : "Drop telemetry file here"}</h2>
+                  <p>Click to browse or drag a CSV, JSON, NDJSON, LOG, or TXT file.</p>
+
+                  <div className="upload-badge-row">
+                    <span>CSV / JSON / NDJSON</span>
+                    <span>Snort LOG / TXT</span>
+                    <span>100 MB Max</span>
+                    <span>{EXPECTED_HEADERS.length} CSV Required Fields</span>
+                  </div>
+                </div>
+              </div>
+
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".csv,.json,.ndjson,.log,.txt,text/csv,application/json,text/plain"
+                className="hidden-input"
+                onChange={(e) => handleSelectedFile(e.target.files?.[0])}
+              />
+
+              {file && (
+                <div className="upload-selected-file">
+                  <div>
+                    <strong>{file.name}</strong>
+                    <span>
+                      Size: {(file.size / 1024).toFixed(2)} KB | Type:{" "}
+                      {file.type || "text/plain"}
+                    </span>
+                  </div>
+
+                  <button type="button" className="upload-clear-btn" onClick={clearUpload}>
+                    Clear
+                  </button>
+                </div>
+              )}
+
+              {(uploading || progress > 0) && (
+                <div className="upload-progress">
+                  <div className="upload-progress-track">
+                    <div
+                      className="upload-progress-fill"
+                      style={{ width: `${progress}%` }}
+                    >
+                      {progress}%
+                    </div>
+                  </div>
+                  <p>{processingText || "Processing telemetry..."}</p>
+                </div>
+              )}
+
+              <div className="upload-controls">
+                <div className="upload-control-group">
+                  <label>Detection Mode</label>
+                  <select
+                    value={predictionType}
+                    onChange={(e) => setPredictionType(e.target.value)}
+                  >
+                    <option value="automatic">Automatic Detection</option>
+                    <option value="hybrid">Hybrid Pipeline</option>
+                    <option value="rules">Rule-Based Analysis</option>
+                  </select>
+                </div>
+
+                <div className="upload-control-group">
+                  <label>Batch Size</label>
+                  <select value={lotSize} onChange={(e) => setLotSize(e.target.value)}>
+                    <option value="100">100 rows</option>
+                    <option value="500">500 rows</option>
+                    <option value="1000">1000 rows</option>
+                    <option value="5000">5000 rows</option>
+                  </select>
+                </div>
+              </div>
+
               <button
                 type="button"
-                className="link-action"
-                onClick={downloadSample}
+                className="upload-primary-btn"
+                onClick={handleUpload}
+                disabled={!file || uploading}
               >
-                Sample CSV Download
+                {uploading ? "Analyzing..." : "Start ThreatLens Analysis"}
               </button>
             </div>
-          </div>
+          </section>
 
-          {error && <div className="error-box">{error}</div>}
+          <aside className="upload-panel">
+            <div className="upload-panel-title">
+              <h3>▦ File Requirements</h3>
+              <span>Validation rules</span>
+            </div>
 
-          <div className="upload-layout">
-            <section className="upload-card">
-              <div className="upload-card-header">
-                Load network traffic data
-              </div>
-
-              <div className="upload-card-body">
-                <div
-                  className={`dropzone ${dragActive ? "active" : ""}`}
-                  onClick={() => inputRef.current?.click()}
-                  onDragEnter={(e) => {
-                    e.preventDefault();
-                    setDragActive(true);
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragActive(true);
-                  }}
-                  onDragLeave={(e) => {
-                    e.preventDefault();
-                    setDragActive(false);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragActive(false);
-                    handleSelectedFile(e.dataTransfer.files?.[0]);
-                  }}
-                >
-                  <div>
-                    <div className="dropzone-icon">{file ? "FILE" : "LOG"}</div>
-                    <h2>{file ? file.name : "Drop your file here"}</h2>
-                    <p>or click to search for and select a file</p>
-
-                    <div className="dropzone-badges">
-                      <span>CSV / JSON / NDJSON</span>
-                      <span>LOG / TXT</span>
-                      <span>Maximum 100 MB</span>
-                      <span>
-                        {EXPECTED_HEADERS.length} required CSV columns
-                      </span>
-                    </div>
-                  </div>
+            <div className="upload-panel-body">
+              <div className="upload-requirements">
+                <div className="upload-requirement-item">
+                  <strong>Supported Format</strong>
+                  <span>CSV, JSON, NDJSON, LOG, and TXT files are supported.</span>
                 </div>
 
-                <input
-                  ref={inputRef}
-                  type="file"
-                  accept=".csv,.json,.ndjson,.log,.txt,text/csv,application/json,text/plain"
-                  className="hidden-input"
-                  onChange={(e) => handleSelectedFile(e.target.files?.[0])}
-                />
-
-                {file && (
-                  <div className="selected-file-card">
-                    <div>
-                      <strong>{file.name}</strong>
-                      <span>
-                        Size: {(file.size / 1024).toFixed(2)} KB | Type:{" "}
-                        {file.type || "text/csv"}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="clear-link"
-                      onClick={clearUpload}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                )}
-
-                {(uploading || progress > 0) && (
-                  <div className="progress-wrap">
-                    <div className="progress-track">
-                      <div
-                        className="progress-fill"
-                        style={{ width: `${progress}%` }}
-                      >
-                        {progress}%
-                      </div>
-                    </div>
-                    <p>{processingText || "Loading and processing..."}</p>
-                  </div>
-                )}
-
-                <div className="upload-controls">
-                  <div className="control-group">
-                    <label>Prediction type</label>
-                    <select
-                      value={predictionType}
-                      onChange={(e) => setPredictionType(e.target.value)}
-                    >
-                      <option value="automatic">Automatic Detection</option>
-                      <option value="hybrid">Hybrid Pipeline</option>
-                      <option value="rules">Rule-based Analysis</option>
-                      
-                    </select>
-                  </div>
-
-                  <div className="control-group">
-                    <label>Lot size</label>
-                    <select
-                      value={lotSize}
-                      onChange={(e) => setLotSize(e.target.value)}
-                    >
-                      <option value="100">100 rows</option>
-                      <option value="500">500 rows</option>
-                      <option value="1000">1000 rows</option>
-                      <option value="5000">5000 rows</option>
-                    </select>
-                  </div>
+                <div className="upload-requirement-item">
+                  <strong>Maximum File Size</strong>
+                  <span>Maximum 100 MB per upload for offline analysis.</span>
                 </div>
 
-                <button
-                  type="button"
-                  className="primary-action"
-                  onClick={handleUpload}
-                  disabled={!file || uploading}
-                >
-                  {uploading ? "Analyzing..." : "Start analysis"}
-                </button>
-              </div>
-            </section>
-
-            <aside className="upload-card">
-              <div className="upload-card-header">File requirements</div>
-
-              <div className="upload-card-body">
-                <div className="requirements-list">
-                  <div className="requirement-item">
-                    <strong>File Format</strong>
-                    <span>
-                      CSV, JSON, NDJSON, LOG, or TXT files are supported.
-                    </span>
-                  </div>
-
-                  <div className="requirement-item">
-                    <strong>File Size</strong>
-                    <span>Maximum 100 MB per upload.</span>
-                  </div>
-
-                  <div className="requirement-item">
-                    <strong>Data structure</strong>
-                    <span>
-                      It must contain structured IDS columns for analysis.
-                    </span>
-                  </div>
-
-                  <div className="requirement-item">
-                    <strong>Columns</strong>
-                    <span>CSV format: {EXPECTED_HEADERS.join(", ")}</span>
-                  </div>
-
-                  <div className="requirement-item">
-                    <strong>Optional Fields</strong>
-                    <span>{OPTIONAL_HEADERS.join(", ")}</span>
-                  </div>
+                <div className="upload-requirement-item">
+                  <strong>Required CSV Columns</strong>
+                  <span>{EXPECTED_HEADERS.join(", ")}</span>
                 </div>
 
-                <div className="tip-box">
-                  Tip: Download the sample CSV file to see the exact format
-                  required.
+                <div className="upload-requirement-item">
+                  <strong>Optional Enrichment Fields</strong>
+                  <span>{OPTIONAL_HEADERS.join(", ")}</span>
                 </div>
               </div>
-            </aside>
+
+              <div className="upload-tip-box">
+                Tip: Use the sample CSV to test upload detection before uploading a larger IDS dataset.
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <section className="upload-stats-grid">
+          <div>
+            <span>Detected Headers</span>
+            <strong>{isCsvFile ? detectedHeaders.length : "-"}</strong>
           </div>
 
-          <div className="upload-stats">
-            <div className="stat-box">
-              <span>Detected Headers</span>
-              <strong>{isCsvFile ? detectedHeaders.length : "-"}</strong>
-            </div>
-
-            <div className="stat-box">
-              <span>Valid Rows</span>
-              <strong>{isCsvFile ? validation.validRows : "-"}</strong>
-            </div>
-
-            <div className="stat-box">
-              <span>Invalid Rows</span>
-              <strong>
-                {isCsvFile
-                  ? [...validation.invalidRows, ...uploadErrors].length
-                  : uploadErrors.length || "-"}
-              </strong>
-            </div>
-
-            <div className="stat-box">
-              <span>Uploaded Rows</span>
-              <strong>
-                {predictionRows.length || result?.meta?.insertedCount || 0}
-              </strong>
-            </div>
+          <div>
+            <span>Valid Rows</span>
+            <strong>{isCsvFile ? validation.validRows : "-"}</strong>
           </div>
 
-          <section className="result-card">
-            <h2>Detection Result</h2>
-            <p>
-              Uploaded telemetry processed through the ThreatLens monitoring
-              pipeline.
-            </p>
+          <div>
+            <span>Invalid Rows</span>
+            <strong>{isCsvFile ? invalidCount : uploadErrors.length || "-"}</strong>
+          </div>
 
+          <div>
+            <span>Uploaded Rows</span>
+            <strong>{predictionRows.length || result?.meta?.insertedCount || 0}</strong>
+          </div>
+        </section>
+
+        <section className="upload-result-panel">
+          <div className="upload-panel-title">
+            <h3>▦ Detection Result</h3>
+            <span>{predictionRows.length || result?.meta?.insertedCount || 0} rows</span>
+          </div>
+
+          <div className="upload-result-body">
             {predictionRows.length ? (
-              <div className="table-wrap">
-                <table className="result-table">
+              <div className="upload-table-wrap">
+                <table className="upload-result-table">
                   <thead>
                     <tr>
                       <th>Protocol</th>
@@ -1027,29 +1009,24 @@ const Upload = () => {
                   <tbody>
                     {predictionRows.slice(0, 12).map((row, index) => (
                       <tr key={row._id || row.id || index}>
-                        <td>{row.protocol || row.metadata?.protocol || "-"}</td>
                         <td>
-                          {row.severity ||
-                            row.metadata?.idsEngine?.severity ||
-                            "-"}
+                          <span className="upload-pill">
+                            {row.protocol || row.metadata?.protocol || "-"}
+                          </span>
                         </td>
+                        <td>{row.severity || row.metadata?.idsEngine?.severity || "-"}</td>
                         <td>
                           {row.attackType ||
                             row.metadata?.attackType ||
                             row.metadata?.idsEngine?.predictedClass ||
                             "-"}
                         </td>
-                        <td>
-                          {row.sourceIp ||
-                            row.metadata?.sourceIp ||
-                            row.ip ||
-                            "-"}
+                        <td className="mono">
+                          {row.sourceIp || row.metadata?.sourceIp || row.ip || "-"}
                         </td>
                         <td>{row.message || "Network event detected"}</td>
                         <td>
-                          {row.timestamp
-                            ? new Date(row.timestamp).toLocaleString()
-                            : "-"}
+                          {row.timestamp ? new Date(row.timestamp).toLocaleString() : "-"}
                         </td>
                       </tr>
                     ))}
@@ -1057,61 +1034,60 @@ const Upload = () => {
                 </table>
               </div>
             ) : hasUploadResult ? (
-              <div className="empty-box">
-                Upload completed successfully. The backend accepted the file,
-                but no row-by-row prediction list was returned for display.
+              <div className="upload-empty-box">
+                Upload completed successfully. Backend accepted the file, but no row-by-row prediction list was returned.
               </div>
             ) : (
-              <div className="empty-box">
-                No prediction output yet. Upload a CSV file to see results here.
+              <div className="upload-empty-box">
+                No output yet. Upload a telemetry file to see detection results here.
               </div>
             )}
-          </section>
+          </div>
+        </section>
 
-          <section className="result-card">
-            <h2>Detected Headers</h2>
-            <p>Headers recognized from the uploaded CSV file.</p>
+        <section className="upload-result-panel">
+          <div className="upload-panel-title">
+            <h3>▦ Detected Headers</h3>
+            <span>{detectedHeaders.length || 0} headers</span>
+          </div>
 
+          <div className="upload-result-body">
             {isCsvFile && detectedHeaders.length ? (
-              <div className="dropzone-badges">
+              <div className="upload-badge-row">
                 {detectedHeaders.map((header) => (
                   <span key={header}>{header}</span>
                 ))}
               </div>
             ) : (
-              <div className="empty-box">No CSV headers detected yet.</div>
+              <div className="upload-empty-box">No CSV headers detected yet.</div>
             )}
-          </section>
+          </div>
+        </section>
 
-          <section className="result-card">
-            <h2>Invalid Rows & Errors</h2>
-            <p>
-              Local CSV validation issues and upload-time problems appear here.
-            </p>
+        <section className="upload-result-panel">
+          <div className="upload-panel-title">
+            <h3>▦ Invalid Rows & Errors</h3>
+            <span>{[...validation.invalidRows, ...uploadErrors].length} issues</span>
+          </div>
 
+          <div className="upload-result-body">
             {[...validation.invalidRows, ...uploadErrors].length ? (
-              <ul className="error-list">
-                {[...validation.invalidRows, ...uploadErrors].map(
-                  (entry, index) => (
-                    <li key={`${entry.rowNumber || "error"}-${index}`}>
-                      <strong>
-                        {entry.rowNumber
-                          ? `Row ${entry.rowNumber}`
-                          : "Upload Error"}
-                      </strong>
-                      <div>
-                        {entry.message || entry.error || JSON.stringify(entry)}
-                      </div>
-                    </li>
-                  ),
-                )}
+              <ul className="upload-error-list">
+                {[...validation.invalidRows, ...uploadErrors].map((entry, index) => (
+                  <li key={`${entry.rowNumber || "error"}-${index}`}>
+                    <strong>
+                      {entry.rowNumber ? `Row ${entry.rowNumber}` : "Upload Error"}
+                    </strong>
+                    <div>{entry.message || entry.error || JSON.stringify(entry)}</div>
+                  </li>
+                ))}
               </ul>
             ) : (
-              <div className="empty-box">No invalid rows detected.</div>
+              <div className="upload-empty-box">No invalid rows detected.</div>
             )}
-          </section>
-        </div>
-      </div>
+          </div>
+        </section>
+      </section>
     </MainLayout>
   );
 };
