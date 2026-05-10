@@ -14,6 +14,7 @@ const {
   hashToken,
   getRefreshTokenExpiry,
 } = require("../utils/tokens");
+
 const {
   normalizeRole,
   ROLE_ADMIN,
@@ -27,25 +28,24 @@ const PRIVILEGED_ROLE_MESSAGES = {
 };
 
 const resolveRequestedRole = (role) => {
-  const normalizedRole = normalizeRole(String(role || ROLE_VIEWER).trim().toLowerCase());
+  const normalizedRole = normalizeRole(
+    String(role || ROLE_VIEWER).trim().toLowerCase()
+  );
+
   return [ROLE_ADMIN, ROLE_ANALYST, ROLE_VIEWER].includes(normalizedRole)
     ? normalizedRole
     : ROLE_VIEWER;
 };
 
 const validatePrivilegedRegistration = (role, accessCode) => {
-  if (role === ROLE_VIEWER) {
-    return null;
-  }
+  if (role === ROLE_VIEWER) return null;
 
   const expectedCode =
     role === ROLE_ADMIN
       ? config.adminRegistrationCode
       : config.analystRegistrationCode;
 
-  if (!accessCode) {
-    return PRIVILEGED_ROLE_MESSAGES[role];
-  }
+  if (!accessCode) return PRIVILEGED_ROLE_MESSAGES[role];
 
   if (String(accessCode).trim() !== expectedCode) {
     return `Invalid ${role} access code`;
@@ -68,34 +68,37 @@ const ensureStoredRole = async (user) => {
 const createAuditLogSafe = async (payload) => {
   try {
     await AuditLog.create(payload);
-  } catch (error) {
+  } catch {
     console.warn("Audit log failed (ignored)");
   }
 };
 
 const setRefreshCookie = (res, token, expiresAt) => {
-  res.cookie(config.refreshCookieName, token, {
+  res.cookie(config.refreshCookieName || "refreshToken", token, {
     httpOnly: true,
-    secure: config.refreshCookieSecure,
-    sameSite: config.refreshCookieSameSite,
-    domain: config.refreshCookieDomain,
+    secure: Boolean(config.refreshCookieSecure),
+    sameSite: config.refreshCookieSameSite || "lax",
+    domain: config.refreshCookieDomain || undefined,
     path: "/",
     expires: expiresAt,
   });
 };
 
 const clearRefreshCookie = (res) => {
-  res.clearCookie(config.refreshCookieName, {
+  res.clearCookie(config.refreshCookieName || "refreshToken", {
     httpOnly: true,
-    secure: config.refreshCookieSecure,
-    sameSite: config.refreshCookieSameSite,
-    domain: config.refreshCookieDomain,
+    secure: Boolean(config.refreshCookieSecure),
+    sameSite: config.refreshCookieSameSite || "lax",
+    domain: config.refreshCookieDomain || undefined,
     path: "/",
   });
 };
 
 const findPrimaryOrganization = async () => {
-  const adminUser = await User.findOne({ role: "admin", _org_id: { $ne: null } })
+  const adminUser = await User.findOne({
+    role: "admin",
+    _org_id: { $ne: null },
+  })
     .sort({ createdAt: 1 })
     .select("_org_id");
 
@@ -115,12 +118,13 @@ const findPrimaryOrganization = async () => {
 };
 
 const buildOrgIdentifier = async (seedValue) => {
-  const baseOrgIdentifier = String(seedValue || "org")
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 32) || "org";
+  const baseOrgIdentifier =
+    String(seedValue || "org")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 32) || "org";
 
   let orgIdentifier = baseOrgIdentifier;
   let suffix = 1;
@@ -132,7 +136,11 @@ const buildOrgIdentifier = async (seedValue) => {
   return orgIdentifier;
 };
 
-const resolveOrganizationForRegistration = async ({ email, username, orgName }) => {
+const resolveOrganizationForRegistration = async ({
+  email,
+  username,
+  orgName,
+}) => {
   if (orgName?.trim()) {
     const orgIdentifier = await buildOrgIdentifier(orgName);
 
@@ -154,9 +162,7 @@ const resolveOrganizationForRegistration = async ({ email, username, orgName }) 
   }
 
   const primaryOrg = await findPrimaryOrganization();
-  if (primaryOrg) {
-    return primaryOrg;
-  }
+  if (primaryOrg) return primaryOrg;
 
   const orgIdentifier = await buildOrgIdentifier(email.split("@")[0]);
 
@@ -177,12 +183,30 @@ const resolveOrganizationForRegistration = async ({ email, username, orgName }) 
   });
 };
 
+const ensureUserOrganization = async (user) => {
+  if (user._org_id) return user;
+
+  console.warn(`User ${user.email} had no organization. Creating fallback org.`);
+
+  const org = await resolveOrganizationForRegistration({
+    email: user.email,
+    username: user.username || user.email.split("@")[0],
+    orgName: null,
+  });
+
+  user._org_id = org._id;
+  await user.save();
+
+  return user;
+};
+
 const maybeRelinkViewerToPrimaryOrg = async (user) => {
   if (!user || user.role === "admin" || !user._org_id) {
     return user;
   }
 
   const primaryOrg = await findPrimaryOrganization();
+
   if (!primaryOrg || primaryOrg._id.toString() === user._org_id.toString()) {
     return user;
   }
@@ -205,7 +229,8 @@ const maybeRelinkViewerToPrimaryOrg = async (user) => {
 
 const register = async (req, res) => {
   try {
-    let { email, password, username, orgName, role, accessCode } = req.body || {};
+    let { email, password, username, orgName, role, accessCode } =
+      req.body || {};
 
     if (!email || !password) {
       return res.status(400).json({
@@ -215,8 +240,8 @@ const register = async (req, res) => {
 
     email = email.trim().toLowerCase();
     password = password.trim();
-    const requestedRole = resolveRequestedRole(role);
 
+    const requestedRole = resolveRequestedRole(role);
     const privilegedRoleError = validatePrivilegedRegistration(
       requestedRole,
       accessCode
@@ -227,12 +252,18 @@ const register = async (req, res) => {
     }
 
     const existing = await User.findOne({ email });
+
     if (existing) {
       return res.status(409).json({ message: "Email already registered" });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const org = await resolveOrganizationForRegistration({ email, username, orgName });
+
+    const org = await resolveOrganizationForRegistration({
+      email,
+      username,
+      orgName,
+    });
 
     const user = await User.create({
       email,
@@ -256,6 +287,7 @@ const register = async (req, res) => {
     });
   } catch (error) {
     console.error("REGISTER ERROR:", error);
+
     return res.status(500).json({
       message: "Registration failed",
       error: config.nodeEnv === "development" ? error.message : undefined,
@@ -275,6 +307,7 @@ const login = async (req, res) => {
 
     email = email.trim().toLowerCase();
     password = password.trim();
+
     const requestedRole = role ? resolveRequestedRole(role) : null;
 
     const user = await User.findOne({ email }).select("+passwordHash");
@@ -289,6 +322,7 @@ const login = async (req, res) => {
           reason: "user_not_found",
         },
       });
+
       return res.status(401).json({ message: "User not found" });
     }
 
@@ -298,6 +332,7 @@ const login = async (req, res) => {
 
     await maybeRelinkViewerToPrimaryOrg(user);
     await ensureStoredRole(user);
+    await ensureUserOrganization(user);
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
 
@@ -312,6 +347,7 @@ const login = async (req, res) => {
           reason: "invalid_password",
         },
       });
+
       return res.status(401).json({ message: "Invalid password" });
     }
 
@@ -328,6 +364,7 @@ const login = async (req, res) => {
           actualRole: user.role,
         },
       });
+
       return res.status(403).json({
         message: `This account is registered as ${user.role}, not ${requestedRole}`,
       });
@@ -365,6 +402,7 @@ const login = async (req, res) => {
     });
   } catch (error) {
     console.error("LOGIN ERROR:", error);
+
     return res.status(500).json({
       message: "Login failed",
       error: config.nodeEnv === "development" ? error.message : undefined,
@@ -382,6 +420,8 @@ const me = async (req, res) => {
 
     await maybeRelinkViewerToPrimaryOrg(user);
     await ensureStoredRole(user);
+    await ensureUserOrganization(user);
+
     return res.json({ user: user.toJSON() });
   } catch (error) {
     console.error("ME ERROR:", error);
@@ -391,13 +431,14 @@ const me = async (req, res) => {
 
 const refresh = async (req, res) => {
   try {
-    const token = req.cookies?.[config.refreshCookieName];
+    const token = req.cookies?.[config.refreshCookieName || "refreshToken"];
 
     if (!token) {
       return res.status(401).json({ message: "Refresh token missing" });
     }
 
     const tokenHash = hashToken(token);
+
     const stored = await RefreshToken.findOne({
       tokenHash,
       revokedAt: null,
@@ -422,6 +463,7 @@ const refresh = async (req, res) => {
 
     await maybeRelinkViewerToPrimaryOrg(user);
     await ensureStoredRole(user);
+    await ensureUserOrganization(user);
 
     const newRefresh = generateRefreshToken();
     const newExpiry = getRefreshTokenExpiry();
@@ -451,7 +493,7 @@ const refresh = async (req, res) => {
 
 const logout = async (req, res) => {
   try {
-    const token = req.cookies?.[config.refreshCookieName];
+    const token = req.cookies?.[config.refreshCookieName || "refreshToken"];
 
     if (token) {
       const tokenHash = hashToken(token);
@@ -463,6 +505,7 @@ const logout = async (req, res) => {
     }
 
     clearRefreshCookie(res);
+
     return res.json({ message: "Logged out successfully" });
   } catch (error) {
     console.error("LOGOUT ERROR:", error);

@@ -6,6 +6,7 @@ const { normalizeRole } = require("../utils/roles");
 const authenticate = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
+
     const token =
       authHeader && authHeader.startsWith("Bearer ")
         ? authHeader.split(" ")[1]
@@ -22,7 +23,11 @@ const authenticate = (req, res, next) => {
       const decoded = jwt.verify(token, config.jwtSecret, {
         algorithms: ["HS256"],
       });
-      const userId = decoded.sub || decoded.id || decoded._id;
+
+      const userId =
+        decoded.sub ||
+        decoded.id ||
+        decoded._id;
 
       if (!userId) {
         return res.status(401).json({
@@ -31,13 +36,32 @@ const authenticate = (req, res, next) => {
         });
       }
 
+      // ==============================
+      // Organization ID Resolution
+      // ==============================
+      const orgId =
+        decoded.orgId ||
+        decoded._org_id ||
+        decoded.organizationId ||
+        decoded.org_id ||
+        null;
+
+      // ==============================
+      // Attach user context
+      // ==============================
       req.user = {
         ...decoded,
         role: normalizeRole(decoded.role),
         sub: userId,
         _id: userId,
-        orgId: decoded.orgId || decoded._org_id || null,
+        orgId,
       };
+
+      // ==============================
+      // IMPORTANT:
+      // Controllers use req.orgId
+      // ==============================
+      req.orgId = orgId;
 
       return next();
     } catch (error) {

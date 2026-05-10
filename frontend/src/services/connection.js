@@ -6,7 +6,7 @@ export const trimTrailingSlashes = (value = "") => String(value).replace(/\/+$/,
 const isLocalHostname = (hostname = "") => LOCALHOST_HOSTS.has(String(hostname).trim().toLowerCase());
 
 const getWindowOrigin = () =>
-  typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  typeof window !== "undefined" ? window.location.origin : "http://localhost:5001";
 
 const normalizeApiBaseUrl = (value) => trimTrailingSlashes(value);
 
@@ -17,7 +17,7 @@ const resolveConfiguredApiBaseUrl = () => {
     if (typeof window !== "undefined") {
       const appHostname = window.location.hostname || "localhost";
       if (isLocalHostname(appHostname)) {
-        return `http://${appHostname}:5000/api`;
+        return `http://${appHostname}:5001/api`;
       }
     }
 
