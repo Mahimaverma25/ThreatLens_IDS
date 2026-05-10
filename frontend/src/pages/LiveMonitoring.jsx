@@ -11,11 +11,35 @@ const formatDateTime = (value) => {
 
 const normalizeStatus = (value) => {
   const normalized = String(value || "unknown").toLowerCase();
-  return normalized === "ok" ? "online" : normalized;
+  if (normalized === "ok" || normalized === "healthy") return "online";
+  return normalized;
 };
 
-const resolveLogPayload = (payload) => payload?.data || payload;
-const resolveAlertPayload = (payload) => payload?.data || payload;
+const resolveLogPayload = (payload) => {
+  if (!payload) return null;
+  if (payload.data?._id) return payload.data;
+  if (payload.log?._id) return payload.log;
+  if (payload.latestEvent?._id) return payload.latestEvent;
+  if (payload.items?.[0]?._id) return payload.items[0];
+  if (payload.data?.items?.[0]?._id) return payload.data.items[0];
+  return payload?._id ? payload : null;
+};
+
+const resolveAlertPayload = (payload) => {
+  if (!payload) return null;
+  if (payload.data?._id) return payload.data;
+  if (payload.alert?._id) return payload.alert;
+  return payload?._id ? payload : null;
+};
+
+const getLogSource = (log) =>
+  log?.metadata?.sensorType || log?.source || "agent";
+
+const getLogProtocol = (log) =>
+  log?.metadata?.protocol ||
+  log?.metadata?.appProtocol ||
+  log?.metadata?.snort?.protocol ||
+  "host";
 
 const LiveMonitoring = () => {
   const [health, setHealth] = useState(null);
@@ -23,8 +47,7 @@ const LiveMonitoring = () => {
   const [recentAlerts, setRecentAlerts] = useState([]);
   const [collectorHeartbeat, setCollectorHeartbeat] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [monitoring, setMonitoring] = useState(false);
+  const [monitoring, setMonitoring] = useState(true);
   const [uptime, setUptime] = useState(0);
   const [consoleLines, setConsoleLines] = useState([]);
   const [error, setError] = useState("");
@@ -33,11 +56,16 @@ const LiveMonitoring = () => {
   const isMountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
   const uptimeRef = useRef(null);
-  const liveConsoleRef = useRef(null);
+
+  const pushConsoleLine = useCallback((line) => {
+    setConsoleLines((current) =>
+      [`[${new Date().toLocaleTimeString()}] ${line}`, ...current].slice(0, 80)
+    );
+  }, []);
 
   const fetchMonitoring = useCallback(async (silent = false) => {
     try {
-      silent ? setRefreshing(true) : setLoading(true);
+      if (!silent) setLoading(true);
       setError("");
 
       const [healthResponse, logsResponse, alertsResponse] = await Promise.all([
@@ -58,61 +86,84 @@ const LiveMonitoring = () => {
         setError(fetchError?.response?.data?.message || "Failed to load live monitoring.");
       }
     } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
+      if (isMountedRef.current) setLoading(false);
     }
   }, []);
 
   const scheduleRefresh = useCallback(() => {
     clearTimeout(refreshTimerRef.current);
-    refreshTimerRef.current = setTimeout(() => fetchMonitoring(true), 300);
+    refreshTimerRef.current = setTimeout(() => fetchMonitoring(true), 400);
   }, [fetchMonitoring]);
 
-  const pushConsoleLine = useCallback((line) => {
-    setConsoleLines((current) => [
-      `[${new Date().toLocaleTimeString()}] ${line}`,
-      ...current,
-    ].slice(0, 60));
-  }, []);
+  const addIncomingLog = useCallback(
+    (incoming) => {
+      if (!incoming?._id) {
+        scheduleRefresh();
+        return;
+      }
+
+      setRecentLogs((current) => {
+        const exists = current.some((item) => item._id === incoming._id);
+        if (exists) {
+          return current.map((item) =>
+            item._id === incoming._id ? { ...item, ...incoming } : item
+          );
+        }
+        return [incoming, ...current].slice(0, 30);
+      });
+
+      pushConsoleLine(
+        `LOG: ${incoming.message || incoming.eventType || "Telemetry event"} | ${getLogSource(
+          incoming
+        )} | ${getLogProtocol(incoming)}`
+      );
+    },
+    [pushConsoleLine, scheduleRefresh]
+  );
+
+  const addIncomingAlert = useCallback(
+    (incoming) => {
+      if (!incoming?._id) {
+        scheduleRefresh();
+        return;
+      }
+
+      setRecentAlerts((current) => {
+        const exists = current.some((item) => item._id === incoming._id);
+        if (exists) {
+          return current.map((item) =>
+            item._id === incoming._id ? { ...item, ...incoming } : item
+          );
+        }
+        return [incoming, ...current].slice(0, 20);
+      });
+
+      pushConsoleLine(
+        `ALERT: ${incoming.type || incoming.attackType || incoming.title || "Threat detected"} | ${
+          incoming.severity || "unknown"
+        }`
+      );
+    },
+    [pushConsoleLine, scheduleRefresh]
+  );
 
   const socketHandlers = useMemo(
     () => ({
-      "logs:new": (payload) => {
-        const incoming = resolveLogPayload(payload);
-        setRecentLogs((current) => [incoming, ...current].slice(0, 30));
-        pushConsoleLine(
-          `${incoming.message || incoming.eventType || "Telemetry Event"} | ${
-            incoming.source || incoming.metadata?.sensorType || "sensor"
-          } | ${
-            incoming.protocol ||
-            incoming.metadata?.protocol ||
-            incoming.metadata?.appProtocol ||
-            incoming.metadata?.snort?.protocol ||
-            "protocol:unknown"
-          }`
-        );
-      },
-      "alerts:new": (payload) => {
-        const incoming = resolveAlertPayload(payload);
-        setRecentAlerts((current) => [incoming, ...current].slice(0, 20));
-        pushConsoleLine(
-          `ALERT: ${incoming.type || incoming.attackType || "Threat detected"} | ${
-            incoming.severity || "unknown"
-          }`
-        );
-      },
+      "logs:new": (payload) => addIncomingLog(resolveLogPayload(payload)),
+      "log:new": (payload) => addIncomingLog(resolveLogPayload(payload)),
+      "alerts:new": (payload) => addIncomingAlert(resolveAlertPayload(payload)),
+      "alert:new": (payload) => addIncomingAlert(resolveAlertPayload(payload)),
       "alerts:update": scheduleRefresh,
+      "dashboard:update": scheduleRefresh,
+      "health:update": scheduleRefresh,
       "collector:heartbeat": (payload) => {
         const heartbeat = payload?.data || payload;
         setCollectorHeartbeat(heartbeat);
-        pushConsoleLine(`Collector heartbeat received from ${heartbeat?.hostname || "agent"}`);
+        pushConsoleLine(`HEARTBEAT: ${heartbeat?.hostname || heartbeat?.assetId || "agent"}`);
         scheduleRefresh();
       },
-      "health:update": scheduleRefresh,
     }),
-    [scheduleRefresh, pushConsoleLine]
+    [addIncomingAlert, addIncomingLog, pushConsoleLine, scheduleRefresh]
   );
 
   const socketState = useSocket(token, socketHandlers);
@@ -121,52 +172,26 @@ const LiveMonitoring = () => {
     isMountedRef.current = true;
     fetchMonitoring();
 
+    uptimeRef.current = setInterval(() => {
+      if (monitoring) setUptime((current) => current + 1);
+    }, 1000);
+
     return () => {
       isMountedRef.current = false;
       clearTimeout(refreshTimerRef.current);
       clearInterval(uptimeRef.current);
-      clearInterval(liveConsoleRef.current);
     };
-  }, [fetchMonitoring]);
+  }, [fetchMonitoring, monitoring]);
 
   const startMonitoring = () => {
     setMonitoring(true);
-    setUptime(0);
-
-    clearInterval(uptimeRef.current);
-    clearInterval(liveConsoleRef.current);
-
-    pushConsoleLine("Starting enhanced monitoring...");
-    pushConsoleLine("Socket.io live channel connected.");
-    pushConsoleLine("Waiting for HIDS/NIDS collector telemetry...");
-
-    uptimeRef.current = setInterval(() => {
-      setUptime((current) => current + 1);
-    }, 1000);
-
-    liveConsoleRef.current = setInterval(() => {
-      fetchMonitoring(true);
-
-      const fallbackMessages = [
-        "Polling live telemetry health...",
-        "Checking IDS engine availability...",
-        "Waiting for new Snort/NIDS events...",
-        "Waiting for new HIDS agent events...",
-        "Refreshing dashboard state...",
-        "Collector connected. Awaiting next event batch.",
-      ];
-
-      pushConsoleLine(fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)]);
-    }, 3000);
-
+    pushConsoleLine("Monitoring started. Listening for live HIDS/NIDS events.");
     fetchMonitoring(true);
   };
 
   const stopMonitoring = () => {
     setMonitoring(false);
-    clearInterval(uptimeRef.current);
-    clearInterval(liveConsoleRef.current);
-    pushConsoleLine("Monitoring stopped by user.");
+    pushConsoleLine("Monitoring paused on frontend. Agent/backend may still be running.");
   };
 
   const formatUptime = (seconds) => {
@@ -178,34 +203,32 @@ const LiveMonitoring = () => {
   const statusCards = useMemo(
     () => [
       {
-        label: "NIDS Status",
-        value: normalizeStatus(health?.snort?.status),
-        meta: health?.snort?.lastEventAt
-          ? `Last event ${formatDateTime(health.snort.lastEventAt)}`
-          : "Waiting for network telemetry",
+        label: "HIDS Agent",
+        value: normalizeStatus(collectorHeartbeat?.status || health?.host?.status),
+        meta:
+          collectorHeartbeat?.hostname ||
+          collectorHeartbeat?.agentType ||
+          "Waiting for endpoint telemetry",
       },
       {
-        label: "HIDS Status",
-        value: normalizeStatus(health?.host?.status),
-        meta: health?.host?.lastEventAt
-          ? `Last event ${formatDateTime(health.host.lastEventAt)}`
-          : "Waiting for endpoint telemetry",
+        label: "NIDS / Snort",
+        value: normalizeStatus(health?.snort?.status || "disabled"),
+        meta: health?.snort?.lastEventAt
+          ? `Last event ${formatDateTime(health.snort.lastEventAt)}`
+          : "Disabled on Windows demo",
       },
       {
         label: "IDS Engine",
         value: normalizeStatus(health?.idsEngine?.status),
-        meta: health?.idsEngine?.message || "Model runtime health",
+        meta: health?.idsEngine?.message || "ML / rule detection service",
       },
       {
-        label: "Collector",
-        value: normalizeStatus(collectorHeartbeat?.status),
-        meta:
-          collectorHeartbeat?.hostname ||
-          collectorHeartbeat?.agentType ||
-          "No collector heartbeat",
+        label: "Socket.io",
+        value: socketState.connectionStatus,
+        meta: socketState.lastError || "Live event channel",
       },
     ],
-    [collectorHeartbeat, health]
+    [collectorHeartbeat, health, socketState]
   );
 
   if (loading) {
@@ -224,12 +247,7 @@ const LiveMonitoring = () => {
           min-height: calc(100vh - 80px);
           background: linear-gradient(135deg, #fff7ed 0%, #f8fbff 55%, #eef9f1 100%);
         }
-
-        .monitor-shell {
-          max-width: 1180px;
-          margin: 0 auto;
-        }
-
+        .monitor-shell { max-width: 1180px; margin: 0 auto; }
         .monitor-hero {
           background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(240,253,244,.88));
           border-radius: 22px;
@@ -238,28 +256,9 @@ const LiveMonitoring = () => {
           border: 1px solid rgba(148,163,184,.18);
           margin-bottom: 24px;
         }
-
-        .monitor-hero h1 {
-          margin: 0;
-          font-size: 34px;
-          color: #0f2742;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .monitor-hero p {
-          margin: 14px 0 16px;
-          color: #64748b;
-          font-size: 15px;
-        }
-
-        .monitor-badges {
-          display: flex;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
+        .monitor-hero h1 { margin: 0; font-size: 34px; color: #0f2742; }
+        .monitor-hero p { margin: 14px 0 16px; color: #64748b; font-size: 15px; }
+        .monitor-badges { display: flex; gap: 12px; flex-wrap: wrap; }
         .monitor-badges span {
           background: linear-gradient(90deg, #0ea5e9, #2563eb);
           color: white;
@@ -267,16 +266,13 @@ const LiveMonitoring = () => {
           border-radius: 999px;
           font-size: 12px;
           font-weight: 900;
-          box-shadow: 0 10px 22px rgba(14,165,233,.22);
         }
-
         .monitor-stats {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 20px;
           margin-bottom: 24px;
         }
-
         .monitor-stat-card {
           background: rgba(255,255,255,.96);
           border-radius: 18px;
@@ -285,22 +281,14 @@ const LiveMonitoring = () => {
           border: 1px solid rgba(148,163,184,.18);
           box-shadow: 0 14px 34px rgba(15,23,42,.07);
         }
-
         .monitor-stat-card strong {
           display: block;
           font-size: 34px;
           color: #0ea5e9;
           margin-bottom: 8px;
         }
-
-        .monitor-stat-card:nth-child(2) strong {
-          color: #ef4444;
-        }
-
-        .monitor-stat-card:nth-child(3) strong {
-          color: #059669;
-        }
-
+        .monitor-stat-card:nth-child(2) strong { color: #ef4444; }
+        .monitor-stat-card:nth-child(3) strong { color: #059669; }
         .monitor-stat-card span {
           color: #64748b;
           font-size: 12px;
@@ -308,14 +296,12 @@ const LiveMonitoring = () => {
           text-transform: uppercase;
           letter-spacing: .08em;
         }
-
         .monitor-grid {
           display: grid;
           grid-template-columns: minmax(0, 2fr) minmax(300px, .9fr);
           gap: 24px;
           align-items: start;
         }
-
         .monitor-card {
           background: rgba(255,255,255,.96);
           border-radius: 20px;
@@ -323,7 +309,6 @@ const LiveMonitoring = () => {
           box-shadow: 0 16px 40px rgba(15,23,42,.08);
           overflow: hidden;
         }
-
         .monitor-card-header {
           padding: 22px 26px;
           display: flex;
@@ -332,7 +317,6 @@ const LiveMonitoring = () => {
           gap: 18px;
           border-bottom: 1px solid #eef2f7;
         }
-
         .live-dot {
           width: 14px;
           height: 14px;
@@ -342,49 +326,19 @@ const LiveMonitoring = () => {
             monitoring ? "rgba(34,197,94,.13)" : "rgba(239,68,68,.12)"
           };
         }
-
-        .monitor-card-header h3 {
-          margin: 0;
-          color: #172033;
-        }
-
-        .monitor-card-header p {
-          margin: 6px 0 0;
-          color: #64748b;
-          font-size: 14px;
-        }
-
-        .monitor-actions {
-          display: flex;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .start-btn,
-        .stop-btn {
+        .monitor-card-header h3 { margin: 0; color: #172033; }
+        .monitor-card-header p { margin: 6px 0 0; color: #64748b; font-size: 14px; }
+        .monitor-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+        .start-btn,.stop-btn {
           border: 0;
           border-radius: 12px;
           padding: 13px 22px;
           font-weight: 900;
           cursor: pointer;
           color: #fff;
-          transition: .2s ease;
         }
-
-        .start-btn {
-          background: linear-gradient(90deg, #0ea5e9, #2563eb);
-          box-shadow: 0 12px 24px rgba(37,99,235,.22);
-        }
-
-        .stop-btn {
-          background: linear-gradient(90deg, #fb7185, #ef4444);
-        }
-
-        .start-btn:hover,
-        .stop-btn:hover {
-          transform: translateY(-1px);
-        }
-
+        .start-btn { background: linear-gradient(90deg, #0ea5e9, #2563eb); }
+        .stop-btn { background: linear-gradient(90deg, #fb7185, #ef4444); }
         .terminal-box {
           margin: 26px;
           min-height: 360px;
@@ -395,9 +349,14 @@ const LiveMonitoring = () => {
           color: #dbeafe;
           font-family: Consolas, monospace;
           overflow: auto;
-          box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
         }
-
+        .terminal-line {
+          padding: 8px 0;
+          border-bottom: 1px solid rgba(255,255,255,.06);
+          font-size: 13px;
+          white-space: pre-wrap;
+        }
+        .terminal-line strong { color: #38bdf8; }
         .terminal-placeholder {
           height: 300px;
           display: grid;
@@ -405,23 +364,6 @@ const LiveMonitoring = () => {
           text-align: center;
           color: #64748b;
         }
-
-        .terminal-placeholder div {
-          font-size: 48px;
-          margin-bottom: 14px;
-        }
-
-        .terminal-line {
-          padding: 8px 0;
-          border-bottom: 1px solid rgba(255,255,255,.06);
-          font-size: 13px;
-          white-space: pre-wrap;
-        }
-
-        .terminal-line strong {
-          color: #38bdf8;
-        }
-
         .monitor-footer {
           padding: 14px 26px 24px;
           display: flex;
@@ -431,11 +373,7 @@ const LiveMonitoring = () => {
           font-size: 13px;
           flex-wrap: wrap;
         }
-
-        .side-section {
-          padding: 24px;
-        }
-
+        .side-section { padding: 24px; }
         .overview-box {
           margin-top: 18px;
           background: #f8fbff;
@@ -443,31 +381,15 @@ const LiveMonitoring = () => {
           padding: 18px;
           border: 1px solid #e2e8f0;
         }
-
-        .overview-box h4 {
-          margin: 0 0 8px;
-          color: #172033;
-        }
-
-        .overview-box p {
-          margin: 0 0 14px;
-          color: #64748b;
-          line-height: 1.6;
-        }
-
-        .health-list {
-          display: grid;
-          gap: 12px;
-          margin-top: 18px;
-        }
-
+        .overview-box h4 { margin: 0 0 8px; color: #172033; }
+        .overview-box p { margin: 0 0 14px; color: #64748b; line-height: 1.6; }
+        .health-list { display: grid; gap: 12px; margin-top: 18px; }
         .health-row {
           border-left: 4px solid #0ea5e9;
           background: #f8fbff;
           border-radius: 12px;
           padding: 14px;
         }
-
         .health-row strong {
           display: flex;
           justify-content: space-between;
@@ -475,11 +397,7 @@ const LiveMonitoring = () => {
           margin-bottom: 6px;
           gap: 8px;
         }
-
-        .health-row small {
-          color: #64748b;
-        }
-
+        .health-row small { color: #64748b; }
         .error-message {
           background: #fff1f2;
           color: #be123c;
@@ -489,28 +407,9 @@ const LiveMonitoring = () => {
           margin-bottom: 18px;
           font-weight: 800;
         }
-
         @media (max-width: 980px) {
           .monitor-page { padding: 22px; }
-          .monitor-stats,
-          .monitor-grid { grid-template-columns: 1fr; }
-        }
-
-        @media (max-width: 620px) {
-          .monitor-page { padding: 16px; }
-          .monitor-hero { padding: 24px; }
-          .monitor-hero h1 { font-size: 26px; }
-          .monitor-card-header {
-            align-items: flex-start;
-            flex-direction: column;
-          }
-          .monitor-actions,
-          .start-btn,
-          .stop-btn { width: 100%; }
-          .terminal-box {
-            margin: 18px;
-            min-height: 280px;
-          }
+          .monitor-stats, .monitor-grid { grid-template-columns: 1fr; }
         }
       `}</style>
 
@@ -519,13 +418,13 @@ const LiveMonitoring = () => {
           <section className="monitor-hero">
             <h1>〽️ Live Network Monitoring</h1>
             <p>
-              Intrusion detection and near real-time threat analysis powered by machine learning,
-              live collectors, Socket.io, HIDS and NIDS telemetry.
+              Real-time HIDS agent telemetry, backend ingestion, live socket updates,
+              and IDS detection visibility.
             </p>
             <div className="monitor-badges">
-              <span>ML-Assisted Detection</span>
-              <span>Live Streaming</span>
-              <span>Near Real-Time</span>
+              <span>HIDS Agent Active</span>
+              <span>MongoDB Ingest</span>
+              <span>Socket.io Live</span>
             </div>
           </section>
 
@@ -542,7 +441,7 @@ const LiveMonitoring = () => {
             </div>
             <div className="monitor-stat-card">
               <strong>{formatUptime(uptime)}</strong>
-              <span>System Uptime</span>
+              <span>Frontend Monitor Uptime</span>
             </div>
           </section>
 
@@ -552,8 +451,8 @@ const LiveMonitoring = () => {
                 <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                   <div className="live-dot" />
                   <div>
-                    <h3>Live telemetry monitoring</h3>
-                    <p>Collector-driven HIDS/NIDS telemetry and threat detection</p>
+                    <h3>Live telemetry stream</h3>
+                    <p>Real HIDS/NIDS events from backend APIs and sockets</p>
                   </div>
                 </div>
 
@@ -578,13 +477,9 @@ const LiveMonitoring = () => {
 
                     {recentLogs.slice(0, 12).map((log, index) => (
                       <div className="terminal-line" key={log._id || index}>
-                        <strong>[{formatDateTime(log.timestamp)}]</strong>{" "}
+                        <strong>[{formatDateTime(log.timestamp || log.createdAt)}]</strong>{" "}
                         {log.message || log.eventType || "Telemetry Event"} |{" "}
-                        {log.source || log.metadata?.sensorType || "sensor"} |{" "}
-                        {log.metadata?.protocol ||
-                          log.metadata?.appProtocol ||
-                          log.metadata?.snort?.protocol ||
-                          "protocol:unknown"}
+                        {getLogSource(log)} | {getLogProtocol(log)}
                       </div>
                     ))}
                   </>
@@ -592,17 +487,17 @@ const LiveMonitoring = () => {
                   <div className="terminal-placeholder">
                     <section>
                       <div>▻_</div>
-                      <p>Advanced Monitoring Console Ready</p>
-                      <p>Click "Start Monitoring" to begin live telemetry tracking</p>
+                      <p>Monitoring Console Ready</p>
+                      <p>Waiting for HIDS agent telemetry...</p>
                     </section>
                   </div>
                 )}
               </div>
 
               <div className="monitor-footer">
-                <span>ⓘ Live logs from monitor.py / agent / backend sockets</span>
+                <span>Live source: agent → api-server → MongoDB → frontend</span>
                 <span>
-                  ◷ Last event:{" "}
+                  Last event:{" "}
                   {recentLogs[0]?.timestamp
                     ? new Date(recentLogs[0].timestamp).toLocaleTimeString()
                     : "—"}
@@ -613,32 +508,27 @@ const LiveMonitoring = () => {
             <aside className="monitor-card">
               <div className="monitor-card-header">
                 <div>
-                  <h3>Compact security notifications</h3>
-                  <p>Monitoring system overview</p>
+                  <h3>System health</h3>
+                  <p>Current live monitoring components</p>
                 </div>
               </div>
 
               <div className="side-section">
                 <div className="overview-box">
-                  <h4>ML Detection Engine</h4>
-                  <p>Machine learning enriches events after ingest and works alongside rule-based detections.</p>
+                  <h4>Current Working Proof</h4>
+                  <p>
+                    The HIDS agent is connected, heartbeats are accepted, and logs are
+                    being inserted into MongoDB through the backend.
+                  </p>
 
-                  <h4>Live Alerts</h4>
-                  <p>Security events are streamed to the dashboard as new logs and alerts arrive.</p>
-
-                  <h4>Buffered Pipeline</h4>
-                  <p>Agents batch and forward events, so dashboard updates are near real-time rather than zero-latency.</p>
+                  <h4>Alert Note</h4>
+                  <p>
+                    Alerts appear only when suspicious traffic or rule-triggering events
+                    are generated.
+                  </p>
                 </div>
 
                 <div className="health-list">
-                  <div className="health-row">
-                    <strong>
-                      Socket.io
-                      <span>{socketState.connectionStatus}</span>
-                    </strong>
-                    <small>{socketState.lastError || "Live channel active"}</small>
-                  </div>
-
                   {statusCards.map((card) => (
                     <div key={card.label} className="health-row">
                       <strong>

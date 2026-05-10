@@ -6,7 +6,17 @@ import useSocket from "../hooks/useSocket";
 
 const LIMIT = 20;
 
-const resolveSocketAlert = (payload) => payload?.data || payload;
+const resolveSocketAlert = (payload) => {
+  if (!payload) return null;
+
+  if (payload.data?._id) return payload.data;
+  if (payload.alert?._id) return payload.alert;
+  if (payload.latestAlert?._id) return payload.latestAlert;
+  if (payload.items?.[0]?._id) return payload.items[0];
+  if (payload.data?.items?.[0]?._id) return payload.data.items[0];
+
+  return payload?._id ? payload : null;
+};
 
 const formatTimestamp = (value) => {
   if (!value) return "No data";

@@ -25,12 +25,18 @@ const OPTIONAL_HEADERS = [
   "destination_port",
 ];
 
-const SUPPORTED_UPLOAD_EXTENSIONS = [".csv", ".json", ".ndjson", ".log", ".txt"];
+const SUPPORTED_UPLOAD_EXTENSIONS = [
+  ".csv",
+  ".json",
+  ".ndjson",
+  ".log",
+  ".txt",
+];
 const MAX_UPLOAD_FILE_SIZE = 100 * 1024 * 1024;
 
 const isSupportedUploadFile = (fileName = "") =>
   SUPPORTED_UPLOAD_EXTENSIONS.some((extension) =>
-    String(fileName).toLowerCase().endsWith(extension)
+    String(fileName).toLowerCase().endsWith(extension),
   );
 
 const splitCsvLine = (line) => {
@@ -92,7 +98,7 @@ const readCsvValidation = async (file) => {
   let validRows = 0;
 
   const missingHeaders = EXPECTED_HEADERS.filter(
-    (header) => !detectedHeaders.includes(header)
+    (header) => !detectedHeaders.includes(header),
   );
 
   if (missingHeaders.length) {
@@ -150,14 +156,16 @@ const resolveUploadedRows = (payload) => {
 };
 
 const resolveDetectedHeaders = (payload) => {
-  if (Array.isArray(payload?.meta?.detectedHeaders)) return payload.meta.detectedHeaders;
+  if (Array.isArray(payload?.meta?.detectedHeaders))
+    return payload.meta.detectedHeaders;
   return [];
 };
 
 const resolveInvalidRows = (payload) => {
   if (Array.isArray(payload?.invalidRows)) return payload.invalidRows;
   if (Array.isArray(payload?.errors)) return payload.errors;
-  if (Array.isArray(payload?.meta?.invalidRows)) return payload.meta.invalidRows;
+  if (Array.isArray(payload?.meta?.invalidRows))
+    return payload.meta.invalidRows;
   return [];
 };
 
@@ -241,13 +249,15 @@ const Upload = () => {
       const timerOne = setTimeout(() => {
         setProgress(55);
         setProcessingText(
-          isCsvFile ? "Validating CSV traffic rows..." : "Validating uploaded log entries..."
+          isCsvFile
+            ? "Validating CSV traffic rows..."
+            : "Validating uploaded log entries...",
         );
       }, 350);
 
       const timerTwo = setTimeout(() => {
         setProgress(90);
-        setProcessingText("Running IDS machine learning analysis...");
+        setProcessingText("Running ThreatLens detection analysis...");
       }, 850);
 
       const response = await uploads.uploadCsv(file);
@@ -777,8 +787,8 @@ const Upload = () => {
             <div className="upload-title">
               <h1>Upload CSV</h1>
               <p>
-                Upload network traffic data, validate CSV headers, and run IDS/ML
-                prediction analysis.
+                Upload telemetry datasets, validate structured IDS fields, and
+                process events through the ThreatLens detection pipeline.
               </p>
             </div>
 
@@ -786,7 +796,11 @@ const Upload = () => {
               <button type="button" className="link-action">
                 CSV Format
               </button>
-              <button type="button" className="link-action" onClick={downloadSample}>
+              <button
+                type="button"
+                className="link-action"
+                onClick={downloadSample}
+              >
                 Sample CSV Download
               </button>
             </div>
@@ -796,7 +810,9 @@ const Upload = () => {
 
           <div className="upload-layout">
             <section className="upload-card">
-              <div className="upload-card-header">Load network traffic data</div>
+              <div className="upload-card-header">
+                Load network traffic data
+              </div>
 
               <div className="upload-card-body">
                 <div
@@ -829,7 +845,9 @@ const Upload = () => {
                       <span>CSV / JSON / NDJSON</span>
                       <span>LOG / TXT</span>
                       <span>Maximum 100 MB</span>
-                      <span>{EXPECTED_HEADERS.length} required CSV columns</span>
+                      <span>
+                        {EXPECTED_HEADERS.length} required CSV columns
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -851,7 +869,11 @@ const Upload = () => {
                         {file.type || "text/csv"}
                       </span>
                     </div>
-                    <button type="button" className="clear-link" onClick={clearUpload}>
+                    <button
+                      type="button"
+                      className="clear-link"
+                      onClick={clearUpload}
+                    >
                       Clear
                     </button>
                   </div>
@@ -860,7 +882,10 @@ const Upload = () => {
                 {(uploading || progress > 0) && (
                   <div className="progress-wrap">
                     <div className="progress-track">
-                      <div className="progress-fill" style={{ width: `${progress}%` }}>
+                      <div
+                        className="progress-fill"
+                        style={{ width: `${progress}%` }}
+                      >
                         {progress}%
                       </div>
                     </div>
@@ -875,9 +900,10 @@ const Upload = () => {
                       value={predictionType}
                       onChange={(e) => setPredictionType(e.target.value)}
                     >
-                      <option value="automatic">Automatic (ML only)</option>
-                      <option value="hybrid">Hybrid (Rules + ML)</option>
-                      <option value="rules">Rule-based only</option>
+                      <option value="automatic">Automatic Detection</option>
+                      <option value="hybrid">Hybrid Pipeline</option>
+                      <option value="rules">Rule-based Analysis</option>
+                      
                     </select>
                   </div>
 
@@ -913,7 +939,9 @@ const Upload = () => {
                 <div className="requirements-list">
                   <div className="requirement-item">
                     <strong>File Format</strong>
-                    <span>CSV, JSON, NDJSON, LOG, or TXT files are supported.</span>
+                    <span>
+                      CSV, JSON, NDJSON, LOG, or TXT files are supported.
+                    </span>
                   </div>
 
                   <div className="requirement-item">
@@ -923,7 +951,9 @@ const Upload = () => {
 
                   <div className="requirement-item">
                     <strong>Data structure</strong>
-                    <span>It must contain structured IDS columns for analysis.</span>
+                    <span>
+                      It must contain structured IDS columns for analysis.
+                    </span>
                   </div>
 
                   <div className="requirement-item">
@@ -938,7 +968,8 @@ const Upload = () => {
                 </div>
 
                 <div className="tip-box">
-                  Tip: Download the sample CSV file to see the exact format required.
+                  Tip: Download the sample CSV file to see the exact format
+                  required.
                 </div>
               </div>
             </aside>
@@ -957,18 +988,27 @@ const Upload = () => {
 
             <div className="stat-box">
               <span>Invalid Rows</span>
-              <strong>{isCsvFile ? [...validation.invalidRows, ...uploadErrors].length : uploadErrors.length || "-"}</strong>
+              <strong>
+                {isCsvFile
+                  ? [...validation.invalidRows, ...uploadErrors].length
+                  : uploadErrors.length || "-"}
+              </strong>
             </div>
 
             <div className="stat-box">
               <span>Uploaded Rows</span>
-              <strong>{predictionRows.length || result?.meta?.insertedCount || 0}</strong>
+              <strong>
+                {predictionRows.length || result?.meta?.insertedCount || 0}
+              </strong>
             </div>
           </div>
 
           <section className="result-card">
-            <h2>Prediction Result</h2>
-            <p>Uploaded events processed by your IDS detection pipeline.</p>
+            <h2>Detection Result</h2>
+            <p>
+              Uploaded telemetry processed through the ThreatLens monitoring
+              pipeline.
+            </p>
 
             {predictionRows.length ? (
               <div className="table-wrap">
@@ -988,7 +1028,11 @@ const Upload = () => {
                     {predictionRows.slice(0, 12).map((row, index) => (
                       <tr key={row._id || row.id || index}>
                         <td>{row.protocol || row.metadata?.protocol || "-"}</td>
-                        <td>{row.severity || row.metadata?.idsEngine?.severity || "-"}</td>
+                        <td>
+                          {row.severity ||
+                            row.metadata?.idsEngine?.severity ||
+                            "-"}
+                        </td>
                         <td>
                           {row.attackType ||
                             row.metadata?.attackType ||
@@ -1014,8 +1058,8 @@ const Upload = () => {
               </div>
             ) : hasUploadResult ? (
               <div className="empty-box">
-                Upload completed successfully. The backend accepted the file, but no row-by-row
-                prediction list was returned for display.
+                Upload completed successfully. The backend accepted the file,
+                but no row-by-row prediction list was returned for display.
               </div>
             ) : (
               <div className="empty-box">
@@ -1041,18 +1085,26 @@ const Upload = () => {
 
           <section className="result-card">
             <h2>Invalid Rows & Errors</h2>
-            <p>Local CSV validation issues and upload-time problems appear here.</p>
+            <p>
+              Local CSV validation issues and upload-time problems appear here.
+            </p>
 
             {[...validation.invalidRows, ...uploadErrors].length ? (
               <ul className="error-list">
-                {[...validation.invalidRows, ...uploadErrors].map((entry, index) => (
-                  <li key={`${entry.rowNumber || "error"}-${index}`}>
-                    <strong>
-                      {entry.rowNumber ? `Row ${entry.rowNumber}` : "Upload Error"}
-                    </strong>
-                    <div>{entry.message || entry.error || JSON.stringify(entry)}</div>
-                  </li>
-                ))}
+                {[...validation.invalidRows, ...uploadErrors].map(
+                  (entry, index) => (
+                    <li key={`${entry.rowNumber || "error"}-${index}`}>
+                      <strong>
+                        {entry.rowNumber
+                          ? `Row ${entry.rowNumber}`
+                          : "Upload Error"}
+                      </strong>
+                      <div>
+                        {entry.message || entry.error || JSON.stringify(entry)}
+                      </div>
+                    </li>
+                  ),
+                )}
               </ul>
             ) : (
               <div className="empty-box">No invalid rows detected.</div>

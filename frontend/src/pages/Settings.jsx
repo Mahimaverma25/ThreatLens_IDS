@@ -14,22 +14,36 @@ const Settings = () => {
   });
 
   const [system, setSystem] = useState({
-    theme: "dark",
     notifications: true,
     liveRefresh: true,
+    criticalAlerts: true,
+    incidentEscalation: true,
   });
 
   const [idsConfig, setIdsConfig] = useState({
+    detectionMode: "hybrid",
     alertThreshold: 70,
-    autoBlock: false,
     severityThreshold: "medium",
+    autoIncident: true,
+    autoBlock: false,
     retentionDays: 30,
+  });
+
+  const [mlConfig, setMlConfig] = useState({
+    randomForest: true,
+    anomalyDetection: true,
+    confidenceThreshold: 85,
+    datasetVersion: "CICIDS2017",
+    autoRetraining: false,
   });
 
   const [agentApi, setAgentApi] = useState({
     endpoint: "",
     apiKey: "",
     assetId: "",
+    snortStatus: "connected",
+    socketStatus: "active",
+    idsEngineStatus: "operational",
   });
 
   const [loading, setLoading] = useState(true);
@@ -60,22 +74,36 @@ const Settings = () => {
         });
 
         setSystem({
-          theme: data?.system?.theme || "dark",
           notifications: Boolean(data?.system?.notifications ?? true),
           liveRefresh: Boolean(data?.system?.liveRefresh ?? true),
+          criticalAlerts: Boolean(data?.system?.criticalAlerts ?? true),
+          incidentEscalation: Boolean(data?.system?.incidentEscalation ?? true),
         });
 
         setIdsConfig({
+          detectionMode: data?.idsConfig?.detectionMode || "hybrid",
           alertThreshold: data?.idsConfig?.alertThreshold ?? 70,
-          autoBlock: Boolean(data?.idsConfig?.autoBlock ?? false),
           severityThreshold: data?.idsConfig?.severityThreshold || "medium",
+          autoIncident: Boolean(data?.idsConfig?.autoIncident ?? true),
+          autoBlock: Boolean(data?.idsConfig?.autoBlock ?? false),
           retentionDays: data?.idsConfig?.retentionDays ?? 30,
+        });
+
+        setMlConfig({
+          randomForest: Boolean(data?.mlConfig?.randomForest ?? true),
+          anomalyDetection: Boolean(data?.mlConfig?.anomalyDetection ?? true),
+          confidenceThreshold: data?.mlConfig?.confidenceThreshold ?? 85,
+          datasetVersion: data?.mlConfig?.datasetVersion || "CICIDS2017",
+          autoRetraining: Boolean(data?.mlConfig?.autoRetraining ?? false),
         });
 
         setAgentApi({
           endpoint: data?.agentApi?.endpoint || "http://localhost:5000/api",
           apiKey: data?.agentApi?.apiKey || "",
           assetId: data?.agentApi?.assetId || "",
+          snortStatus: data?.agentApi?.snortStatus || "connected",
+          socketStatus: data?.agentApi?.socketStatus || "active",
+          idsEngineStatus: data?.agentApi?.idsEngineStatus || "operational",
         });
       } catch (err) {
         setError(err?.response?.data?.message || "Failed to load settings.");
@@ -97,9 +125,14 @@ const Settings = () => {
       if (password.newPass !== password.confirmPass) return "New password and confirm password do not match.";
     }
 
-    const threshold = Number(idsConfig.alertThreshold);
-    if (Number.isNaN(threshold) || threshold < 0 || threshold > 100) {
+    const alertThreshold = Number(idsConfig.alertThreshold);
+    if (Number.isNaN(alertThreshold) || alertThreshold < 0 || alertThreshold > 100) {
       return "Alert threshold must be between 0 and 100.";
+    }
+
+    const confidenceThreshold = Number(mlConfig.confidenceThreshold);
+    if (Number.isNaN(confidenceThreshold) || confidenceThreshold < 0 || confidenceThreshold > 100) {
+      return "ML confidence threshold must be between 0 and 100.";
     }
 
     const retention = Number(idsConfig.retentionDays);
@@ -112,6 +145,7 @@ const Settings = () => {
 
   const handleSave = async () => {
     const validationError = validateBeforeSave();
+
     if (validationError) {
       setError(validationError);
       setFeedback("");
@@ -131,6 +165,10 @@ const Settings = () => {
           alertThreshold: Number(idsConfig.alertThreshold),
           retentionDays: Number(idsConfig.retentionDays),
         },
+        mlConfig: {
+          ...mlConfig,
+          confidenceThreshold: Number(mlConfig.confidenceThreshold),
+        },
         agentApi,
       };
 
@@ -145,30 +183,6 @@ const Settings = () => {
       const data = response?.data?.data || {};
 
       if (data?.user) updateUser(data.user);
-
-      setProfile({
-        name: data?.profile?.name || profile.name,
-        email: data?.profile?.email || profile.email,
-      });
-
-      setSystem({
-        theme: data?.system?.theme || system.theme,
-        notifications: Boolean(data?.system?.notifications ?? system.notifications),
-        liveRefresh: Boolean(data?.system?.liveRefresh ?? system.liveRefresh),
-      });
-
-      setIdsConfig({
-        alertThreshold: data?.idsConfig?.alertThreshold ?? idsConfig.alertThreshold,
-        autoBlock: Boolean(data?.idsConfig?.autoBlock ?? idsConfig.autoBlock),
-        severityThreshold: data?.idsConfig?.severityThreshold || idsConfig.severityThreshold,
-        retentionDays: data?.idsConfig?.retentionDays ?? idsConfig.retentionDays,
-      });
-
-      setAgentApi({
-        endpoint: data?.agentApi?.endpoint || agentApi.endpoint,
-        apiKey: data?.agentApi?.apiKey || agentApi.apiKey,
-        assetId: data?.agentApi?.assetId || agentApi.assetId,
-      });
 
       setPassword({ current: "", newPass: "", confirmPass: "" });
       setFeedback(response?.data?.message || "Settings saved successfully.");
@@ -359,8 +373,38 @@ const Settings = () => {
           line-height: 1.6;
         }
 
+        .status-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+          margin-top: 14px;
+        }
+
+        .status-chip {
+          padding: 14px;
+          border-radius: 14px;
+          background: #f8fbff;
+          border: 1px solid #e2e8f0;
+        }
+
+        .status-chip span {
+          display: block;
+          color: #64748b;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .status-chip strong {
+          display: block;
+          margin-top: 6px;
+          color: #047857;
+          font-size: 14px;
+          text-transform: capitalize;
+        }
+
         @media (max-width: 900px) {
-          .settings-grid {
+          .settings-grid,
+          .status-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -391,8 +435,11 @@ const Settings = () => {
       <div className="settings-page">
         <div className="settings-shell">
           <div className="settings-header">
-            <h1>Settings</h1>
-            <p>Manage your ThreatLens profile, IDS rules, live monitoring and agent configuration.</p>
+            <h1>ThreatLens Settings</h1>
+            <p>
+              Manage SOC configuration, IDS behavior, ML detection parameters,
+              live monitoring, and secure agent connectivity.
+            </p>
           </div>
 
           {error ? <div className="error-message">{error}</div> : null}
@@ -405,14 +452,18 @@ const Settings = () => {
               <div className="settings-grid">
                 <div className="settings-card">
                   <h3>User Profile</h3>
-                  <p className="hint">Update account details used inside the ThreatLens dashboard.</p>
+                  <p className="hint">
+                    Account details used inside the ThreatLens SOC dashboard.
+                  </p>
 
                   <div className="field-group">
                     <label>Name</label>
                     <input
                       type="text"
                       value={profile.name}
-                      onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                      onChange={(e) =>
+                        setProfile({ ...profile, name: e.target.value })
+                      }
                     />
                   </div>
 
@@ -421,21 +472,27 @@ const Settings = () => {
                     <input
                       type="email"
                       value={profile.email}
-                      onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+                      onChange={(e) =>
+                        setProfile({ ...profile, email: e.target.value })
+                      }
                     />
                   </div>
                 </div>
 
                 <div className="settings-card">
                   <h3>Change Password</h3>
-                  <p className="hint">Leave these fields empty if you do not want to change your password.</p>
+                  <p className="hint">
+                    Keep your analyst/admin account secure.
+                  </p>
 
                   <div className="field-group">
                     <label>Current Password</label>
                     <input
                       type="password"
                       value={password.current}
-                      onChange={(e) => setPassword({ ...password, current: e.target.value })}
+                      onChange={(e) =>
+                        setPassword({ ...password, current: e.target.value })
+                      }
                     />
                   </div>
 
@@ -444,7 +501,9 @@ const Settings = () => {
                     <input
                       type="password"
                       value={password.newPass}
-                      onChange={(e) => setPassword({ ...password, newPass: e.target.value })}
+                      onChange={(e) =>
+                        setPassword({ ...password, newPass: e.target.value })
+                      }
                     />
                     <span className="strength">Strength: {passwordStrength}</span>
                   </div>
@@ -454,54 +513,81 @@ const Settings = () => {
                     <input
                       type="password"
                       value={password.confirmPass}
-                      onChange={(e) => setPassword({ ...password, confirmPass: e.target.value })}
+                      onChange={(e) =>
+                        setPassword({ ...password, confirmPass: e.target.value })
+                      }
                     />
                   </div>
                 </div>
 
                 <div className="settings-card">
-                  <h3>System Preferences</h3>
-                  <p className="hint">Control dashboard appearance and live update behavior.</p>
-
-                  <div className="field-group">
-                    <label>Theme</label>
-                    <select
-                      value={system.theme}
-                      onChange={(e) => setSystem({ ...system, theme: e.target.value })}
-                    >
-                      <option value="dark">Dark</option>
-                      <option value="light">Light</option>
-                    </select>
-                  </div>
+                  <h3>Security Operations</h3>
+                  <p className="hint">
+                    Controls alert notifications, escalation, and real-time SOC behavior.
+                  </p>
 
                   <div className="toggle-row">
                     <div>
-                      <strong>Enable Notifications</strong>
-                      <small>Show alert notifications in the dashboard.</small>
+                      <strong>Critical Alert Notifications</strong>
+                      <small>Show priority notifications for critical alerts.</small>
                     </div>
                     <input
                       type="checkbox"
-                      checked={system.notifications}
-                      onChange={(e) => setSystem({ ...system, notifications: e.target.checked })}
+                      checked={system.criticalAlerts}
+                      onChange={(e) =>
+                        setSystem({ ...system, criticalAlerts: e.target.checked })
+                      }
                     />
                   </div>
 
                   <div className="toggle-row">
                     <div>
                       <strong>Live Auto Refresh</strong>
-                      <small>Allow live pages to refresh logs and alerts automatically.</small>
+                      <small>Automatically refresh logs, alerts, and dashboard signals.</small>
                     </div>
                     <input
                       type="checkbox"
                       checked={system.liveRefresh}
-                      onChange={(e) => setSystem({ ...system, liveRefresh: e.target.checked })}
+                      onChange={(e) =>
+                        setSystem({ ...system, liveRefresh: e.target.checked })
+                      }
+                    />
+                  </div>
+
+                  <div className="toggle-row">
+                    <div>
+                      <strong>Incident Escalation</strong>
+                      <small>Create incident workflow for high-risk detections.</small>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={system.incidentEscalation}
+                      onChange={(e) =>
+                        setSystem({ ...system, incidentEscalation: e.target.checked })
+                      }
                     />
                   </div>
                 </div>
 
                 <div className="settings-card">
                   <h3>IDS Configuration</h3>
-                  <p className="hint">Configure detection sensitivity and response behavior.</p>
+                  <p className="hint">
+                    Configure hybrid detection, severity threshold, retention, and response behavior.
+                  </p>
+
+                  <div className="field-group">
+                    <label>Detection Engine Mode</label>
+                    <select
+                      value={idsConfig.detectionMode}
+                      onChange={(e) =>
+                        setIdsConfig({ ...idsConfig, detectionMode: e.target.value })
+                      }
+                    >
+                      <option value="hybrid">Hybrid Detection - Snort + ML</option>
+                      <option value="rules">Rule-Based Detection Only</option>
+                      <option value="ml">ML-Assisted Detection</option>
+                    </select>
+                  </div>
 
                   <div className="field-group">
                     <label>Alert Threshold (%)</label>
@@ -521,7 +607,10 @@ const Settings = () => {
                     <select
                       value={idsConfig.severityThreshold}
                       onChange={(e) =>
-                        setIdsConfig({ ...idsConfig, severityThreshold: e.target.value })
+                        setIdsConfig({
+                          ...idsConfig,
+                          severityThreshold: e.target.value,
+                        })
                       }
                     >
                       <option value="low">Low</option>
@@ -545,8 +634,22 @@ const Settings = () => {
 
                   <div className="toggle-row">
                     <div>
+                      <strong>Auto Incident Generation</strong>
+                      <small>Generate incidents automatically for high-risk alerts.</small>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={idsConfig.autoIncident}
+                      onChange={(e) =>
+                        setIdsConfig({ ...idsConfig, autoIncident: e.target.checked })
+                      }
+                    />
+                  </div>
+
+                  <div className="toggle-row">
+                    <div>
                       <strong>Auto IP Blocking</strong>
-                      <small>Automatically block IPs when risk exceeds threshold.</small>
+                      <small>Block IPs automatically when risk crosses threshold.</small>
                     </div>
                     <input
                       type="checkbox"
@@ -559,8 +662,89 @@ const Settings = () => {
                 </div>
 
                 <div className="settings-card">
+                  <h3>Machine Learning Engine</h3>
+                  <p className="hint">
+                    Configure Random Forest, anomaly detection, and prediction confidence.
+                  </p>
+
+                  <div className="toggle-row">
+                    <div>
+                      <strong>Random Forest Model</strong>
+                      <small>Enable supervised attack classification.</small>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={mlConfig.randomForest}
+                      onChange={(e) =>
+                        setMlConfig({ ...mlConfig, randomForest: e.target.checked })
+                      }
+                    />
+                  </div>
+
+                  <div className="toggle-row">
+                    <div>
+                      <strong>Anomaly Detection</strong>
+                      <small>Enable suspicious behavior detection for unknown patterns.</small>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={mlConfig.anomalyDetection}
+                      onChange={(e) =>
+                        setMlConfig({
+                          ...mlConfig,
+                          anomalyDetection: e.target.checked,
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="field-group">
+                    <label>Model Confidence Threshold (%)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={mlConfig.confidenceThreshold}
+                      onChange={(e) =>
+                        setMlConfig({
+                          ...mlConfig,
+                          confidenceThreshold: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="field-group">
+                    <label>Dataset Version</label>
+                    <input
+                      type="text"
+                      value={mlConfig.datasetVersion}
+                      onChange={(e) =>
+                        setMlConfig({ ...mlConfig, datasetVersion: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  <div className="toggle-row">
+                    <div>
+                      <strong>Auto Retraining</strong>
+                      <small>Disabled by default for controlled academic evaluation.</small>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={mlConfig.autoRetraining}
+                      onChange={(e) =>
+                        setMlConfig({ ...mlConfig, autoRetraining: e.target.checked })
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-card">
                   <h3>Agent / API Settings</h3>
-                  <p className="hint">Used by HIDS/NIDS collectors to send telemetry to the backend.</p>
+                  <p className="hint">
+                    Used by HIDS/NIDS collectors to send telemetry to the backend.
+                  </p>
 
                   <div className="field-group">
                     <label>API Endpoint</label>
@@ -568,7 +752,9 @@ const Settings = () => {
                       type="text"
                       placeholder="http://localhost:5000/api"
                       value={agentApi.endpoint}
-                      onChange={(e) => setAgentApi({ ...agentApi, endpoint: e.target.value })}
+                      onChange={(e) =>
+                        setAgentApi({ ...agentApi, endpoint: e.target.value })
+                      }
                     />
                   </div>
 
@@ -578,7 +764,9 @@ const Settings = () => {
                       type="text"
                       placeholder="THREATLENS_API_KEY"
                       value={agentApi.apiKey}
-                      onChange={(e) => setAgentApi({ ...agentApi, apiKey: e.target.value })}
+                      onChange={(e) =>
+                        setAgentApi({ ...agentApi, apiKey: e.target.value })
+                      }
                     />
                   </div>
 
@@ -588,13 +776,29 @@ const Settings = () => {
                       type="text"
                       placeholder="endpoint-001"
                       value={agentApi.assetId}
-                      onChange={(e) => setAgentApi({ ...agentApi, assetId: e.target.value })}
+                      onChange={(e) =>
+                        setAgentApi({ ...agentApi, assetId: e.target.value })
+                      }
                     />
                   </div>
 
+                  <div className="status-grid">
+                    <div className="status-chip">
+                      <span>Snort Integration</span>
+                      <strong>{agentApi.snortStatus}</strong>
+                    </div>
+                    <div className="status-chip">
+                      <span>Socket.IO Stream</span>
+                      <strong>{agentApi.socketStatus}</strong>
+                    </div>
+                    <div className="status-chip">
+                      <span>IDS Engine</span>
+                      <strong>{agentApi.idsEngineStatus}</strong>
+                    </div>
+                  </div>
+
                   <div className="settings-note">
-                    This page saves the values for dashboard configuration. Your actual HIDS/NIDS
-                    agent must still use matching values in its `.env` file.
+                    This page stores dashboard configuration. The actual HIDS/NIDS agent must still use matching values inside its `.env` file.
                   </div>
                 </div>
               </div>

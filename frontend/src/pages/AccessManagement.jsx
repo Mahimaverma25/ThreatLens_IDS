@@ -8,7 +8,11 @@ const AccessManagement = () => {
   const [userList, setUserList] = useState([]);
   const [keyList, setKeyList] = useState([]);
   const [assetList, setAssetList] = useState([]);
-  const [form, setForm] = useState({ asset_id: "", key_name: "", expiration_days: 30 });
+  const [form, setForm] = useState({
+    asset_id: "",
+    key_name: "",
+    expiration_days: 30,
+  });
   const [latestSecret, setLatestSecret] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,7 +48,10 @@ const AccessManagement = () => {
       setKeyList(keysResponse?.data?.data ?? []);
     } catch (fetchError) {
       console.error("Access management error:", fetchError);
-      setError(fetchError?.response?.data?.message || "Failed to load access management data");
+      setError(
+        fetchError?.response?.data?.message ||
+          "Failed to load access management data",
+      );
     } finally {
       setLoading(false);
     }
@@ -64,7 +71,9 @@ const AccessManagement = () => {
       await loadAccessData();
     } catch (saveError) {
       console.error("API key create error:", saveError);
-      setError(saveError?.response?.data?.message || "Failed to create API key");
+      setError(
+        saveError?.response?.data?.message || "Failed to create API key",
+      );
     } finally {
       setSaving(false);
     }
@@ -78,7 +87,9 @@ const AccessManagement = () => {
       await loadAccessData();
     } catch (rotateError) {
       console.error("API key rotate error:", rotateError);
-      setError(rotateError?.response?.data?.message || "Failed to rotate API key");
+      setError(
+        rotateError?.response?.data?.message || "Failed to rotate API key",
+      );
     }
   };
 
@@ -89,16 +100,21 @@ const AccessManagement = () => {
       await loadAccessData();
     } catch (revokeError) {
       console.error("API key revoke error:", revokeError);
-      setError(revokeError?.response?.data?.message || "Failed to revoke API key");
+      setError(
+        revokeError?.response?.data?.message || "Failed to revoke API key",
+      );
     }
   };
 
-  const summary = useMemo(() => ({
-    users: userList.length,
-    admins: userList.filter((entry) => entry.role === "admin").length,
-    activeKeys: keyList.filter((key) => key.is_active).length,
-    expiredKeys: keyList.filter((key) => key.is_expired).length,
-  }), [keyList, userList]);
+  const summary = useMemo(
+    () => ({
+      users: userList.length,
+      admins: userList.filter((entry) => entry.role === "admin").length,
+      activeKeys: keyList.filter((key) => key.is_active).length,
+      expiredKeys: keyList.filter((key) => key.is_expired).length,
+    }),
+    [keyList, userList],
+  );
 
   if (loading) {
     return (
@@ -112,30 +128,54 @@ const AccessManagement = () => {
     <MainLayout>
       <section className="command-header">
         <div>
-          <div className="command-eyebrow">ThreatLens / Identity / integration credentials</div>
+          <div className="command-eyebrow">
+            ThreatLens / Identity / integration credentials
+          </div>
           <h1>Users / API Keys</h1>
-          <p>Review user access, monitored assets, and ingestion credentials for the hybrid detection pipeline.</p>
+          <p>
+            Review user access, monitored assets, and ingestion credentials for
+            the hybrid detection pipeline.
+          </p>
         </div>
       </section>
 
       {error && <div className="error-message">{error}</div>}
 
-      <section className="metrics-grid">
+      <section className="tl-access-metrics">
         <div className="metric-card">
-          <span>Users</span>
+          <span>Total Users</span>
           <strong>{summary.users}</strong>
+          <small>Registered organization accounts</small>
         </div>
+
         <div className="metric-card">
-          <span>Admins</span>
+          <span>Administrators</span>
           <strong>{summary.admins}</strong>
+          <small>Full platform control</small>
         </div>
+
         <div className="metric-card">
-          <span>Active Keys</span>
+          <span>Security Analysts</span>
+          <strong>{summary.analysts}</strong>
+          <small>Incident investigation access</small>
+        </div>
+
+        <div className="metric-card">
+          <span>Viewer Accounts</span>
+          <strong>{summary.viewers}</strong>
+          <small>Read-only SOC visibility</small>
+        </div>
+
+        <div className="metric-card">
+          <span>Active API Keys</span>
           <strong>{summary.activeKeys}</strong>
+          <small>Live ingestion credentials</small>
         </div>
+
         <div className="metric-card">
-          <span>Tracked Assets</span>
-          <strong>{assetList.length}</strong>
+          <span>Monitored Assets</span>
+          <strong>{summary.assets}</strong>
+          <small>Connected endpoints & agents</small>
         </div>
       </section>
 
@@ -143,37 +183,70 @@ const AccessManagement = () => {
         <div className="card">
           <h3>Generate API Key</h3>
           <div className="form-grid">
-            <select value={form.asset_id} onChange={(event) => setForm((current) => ({ ...current, asset_id: event.target.value }))}>
+            <select
+              value={form.asset_id}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  asset_id: event.target.value,
+                }))
+              }
+            >
               {assetList.map((asset) => (
                 <option key={asset._id} value={asset._id}>
                   {asset.asset_name}
                 </option>
               ))}
             </select>
-            <input value={form.key_name} placeholder="Key name" onChange={(event) => setForm((current) => ({ ...current, key_name: event.target.value }))} />
+            <input
+              value={form.key_name}
+              placeholder="Key name"
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  key_name: event.target.value,
+                }))
+              }
+            />
             <input
               type="number"
               min="1"
               value={form.expiration_days}
-              onChange={(event) => setForm((current) => ({ ...current, expiration_days: Number(event.target.value) }))}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  expiration_days: Number(event.target.value),
+                }))
+              }
             />
           </div>
-          <button className="scan-btn" disabled={saving || !form.asset_id || !form.key_name} onClick={handleCreateKey}>
+          <button
+            className="scan-btn"
+            disabled={saving || !form.asset_id || !form.key_name}
+            onClick={handleCreateKey}
+          >
             {saving ? "Generating..." : "Generate API Key"}
           </button>
 
           {latestSecret && (
             <div className="generated-secret">
               <strong>{latestSecret.key_name}</strong>
-              <div>Token: <span className="mono-text">{latestSecret.token}</span></div>
-              <div>Secret: <span className="mono-text">{latestSecret.secret}</span></div>
+              <div>
+                Token: <span className="mono-text">{latestSecret.token}</span>
+              </div>
+              <div>
+                Secret: <span className="mono-text">{latestSecret.secret}</span>
+              </div>
             </div>
           )}
         </div>
       ) : (
         <div className="card">
           <h3>Credential Access</h3>
-          <p>API key management is limited to the admin role. Your account can still review monitored assets and user access below.</p>
+          <p>
+            API key management is limited to the admin role. Your account can
+            still review monitored assets and user access below.
+          </p>
         </div>
       )}
 
@@ -199,7 +272,11 @@ const AccessManagement = () => {
                     <td>{entry.email}</td>
                     <td>{entry.username || "-"}</td>
                     <td>{entry.role}</td>
-                    <td>{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "-"}</td>
+                    <td>
+                      {entry.createdAt
+                        ? new Date(entry.createdAt).toLocaleString()
+                        : "-"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -210,7 +287,11 @@ const AccessManagement = () => {
         <div className="dashboard-panel panel-wide">
           <div className="panel-header">
             <h3>{isAdmin ? "API Keys" : "Monitored Assets"}</h3>
-            <span>{isAdmin ? "Agent ingestion credentials" : "Assets available for agent onboarding"}</span>
+            <span>
+              {isAdmin
+                ? "Agent ingestion credentials"
+                : "Assets available for agent onboarding"}
+            </span>
           </div>
           {isAdmin ? (
             <div className="panel-table">
@@ -229,16 +310,36 @@ const AccessManagement = () => {
                   {keyList.map((key) => (
                     <tr key={key._id}>
                       <td>{key.key_name}</td>
-                      <td>{key.asset?.asset_name || key.asset?.asset_id || "-"}</td>
-                      <td>{key.is_active ? (key.is_expired ? "Expired" : "Active") : "Revoked"}</td>
+                      <td>
+                        {key.asset?.asset_name || key.asset?.asset_id || "-"}
+                      </td>
+                      <td>
+                        {key.is_active
+                          ? key.is_expired
+                            ? "Expired"
+                            : "Active"
+                          : "Revoked"}
+                      </td>
                       <td>{key.usage_count || 0}</td>
-                      <td>{key.last_used_at ? new Date(key.last_used_at).toLocaleString() : "Never"}</td>
+                      <td>
+                        {key.last_used_at
+                          ? new Date(key.last_used_at).toLocaleString()
+                          : "Never"}
+                      </td>
                       <td>
                         <div className="table-actions">
-                          <button className="ghost-btn" onClick={() => handleRotate(key._id)} disabled={!key.is_active}>
+                          <button
+                            className="ghost-btn"
+                            onClick={() => handleRotate(key._id)}
+                            disabled={!key.is_active}
+                          >
                             Rotate
                           </button>
-                          <button className="ghost-btn" onClick={() => handleRevoke(key._id)} disabled={!key.is_active}>
+                          <button
+                            className="ghost-btn"
+                            onClick={() => handleRevoke(key._id)}
+                            disabled={!key.is_active}
+                          >
                             Revoke
                           </button>
                         </div>
@@ -267,7 +368,11 @@ const AccessManagement = () => {
                       <td>{asset.asset_type}</td>
                       <td>{asset.hostname || "-"}</td>
                       <td>{asset.agent_status || "-"}</td>
-                      <td>{Array.isArray(asset.telemetry_types) ? asset.telemetry_types.join(", ") || "-" : "-"}</td>
+                      <td>
+                        {Array.isArray(asset.telemetry_types)
+                          ? asset.telemetry_types.join(", ") || "-"
+                          : "-"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

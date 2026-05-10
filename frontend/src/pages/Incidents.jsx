@@ -174,7 +174,20 @@ const Incidents = () => {
       },
 
       "incidents:new": (event) => {
-        const incident = event?.data || event;
+        const incident =
+  event?.data?._id
+    ? event.data
+    : event?.incident?._id
+      ? event.incident
+      : event?.latestIncident?._id
+        ? event.latestIncident
+        : event?.items?.[0]?._id
+          ? event.items[0]
+          : event?.data?.items?.[0]?._id
+            ? event.data.items[0]
+            : event?._id
+              ? event
+              : null;
 
         if (incident?._id) {
           setIncidentRows((current) => {
@@ -195,7 +208,20 @@ const Incidents = () => {
       },
 
       "incidents:update": (event) => {
-        const incident = event?.data || event;
+        const incident =
+  event?.data?._id
+    ? event.data
+    : event?.incident?._id
+      ? event.incident
+      : event?.latestIncident?._id
+        ? event.latestIncident
+        : event?.items?.[0]?._id
+          ? event.items[0]
+          : event?.data?.items?.[0]?._id
+            ? event.data.items[0]
+            : event?._id
+              ? event
+              : null;
 
         if (incident?._id) {
           setIncidentRows((current) =>

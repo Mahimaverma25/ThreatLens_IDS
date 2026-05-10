@@ -71,7 +71,7 @@ const datasetPoints = [
   "6 attack categories + Normal traffic",
   "98.13% F1 Score achieved",
   "Balanced class distribution",
-  "Production-ready performance",
+  "Academic prototype performance tracking",
 ];
 
 const techStack = [
@@ -86,12 +86,12 @@ const techStack = [
 ];
 
 const features = [
-  "Real-time network monitoring",
-  "CSV dataset attack analysis",
-  "HIDS and NIDS telemetry support",
-  "ML-based attack classification",
-  "Rule-based detection engine",
-  "Live alerts and incident workflow",
+  "Real-time HIDS agent telemetry",
+  "Authenticated backend log ingestion",
+  "MongoDB-based event storage",
+  "Socket.IO live monitoring dashboard",
+  "Rule-based detection workflow",
+  "Alerts and incident management workflow",
 ];
 
 const Overview = () => {
@@ -118,9 +118,9 @@ const Overview = () => {
         </section>
 
         <section className="tl-section-heading">
-          <h2>Ensemble Machine Learning Model</h2>
-          <p>Production-ready algorithms for network intrusion detection</p>
-          <span>Ensemble Model: Random Forest + SVM + Decision Tree</span>
+          <h2>Detection Approach</h2>
+          <p>Rule-based detection with planned ML-assisted classification</p>
+          <span>Hybrid Pipeline: HIDS Agent + Detection Rules + Optional ML Engine</span>
         </section>
 
         <section className="tl-model-grid">

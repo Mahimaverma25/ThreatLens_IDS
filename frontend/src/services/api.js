@@ -5,7 +5,12 @@ import {
   setActiveApiBaseUrl,
 } from "./connection";
 
-const API_BASE_URL = getActiveApiBaseUrl();
+const normalizeApiBaseUrl = (url = "") => {
+  const clean = String(url || "http://localhost:5001/api").replace(/\/+$/, "");
+  return clean.endsWith("/api") ? clean : `${clean}/api`;
+};
+
+const API_BASE_URL = normalizeApiBaseUrl(getActiveApiBaseUrl());
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -36,7 +41,7 @@ api.interceptors.request.use(
   (config) => {
     const accessToken = getToken();
 
-    config.baseURL = getActiveApiBaseUrl();
+    config.baseURL = normalizeApiBaseUrl(getActiveApiBaseUrl());
 
     if (accessToken) {
       config.headers.Authorization = `Bearer ${accessToken}`;
@@ -69,18 +74,9 @@ const isRouteNotFoundResponse = (error) =>
   /route not found/i.test(String(error?.response?.data?.message || ""));
 
 const shouldTryAlternateApiBase = (error, request = {}) => {
-  if (!request || request._apiBaseRetried) {
-    return false;
-  }
-
-  if (!error.response) {
-    return true;
-  }
-
-  if (isRouteNotFoundResponse(error)) {
-    return true;
-  }
-
+  if (!request || request._apiBaseRetried) return false;
+  if (!error.response) return true;
+  if (isRouteNotFoundResponse(error)) return true;
   return false;
 };
 
@@ -92,19 +88,23 @@ api.interceptors.response.use(
 
     if (!originalRequest) return Promise.reject(error);
 
-     if (shouldTryAlternateApiBase(error, originalRequest)) {
-      const nextApiBaseUrl = getNextApiBaseUrl(originalRequest.baseURL || getActiveApiBaseUrl());
+    if (shouldTryAlternateApiBase(error, originalRequest)) {
+      const nextApiBaseUrl = getNextApiBaseUrl(
+        originalRequest.baseURL || getActiveApiBaseUrl()
+      );
 
       if (nextApiBaseUrl) {
         originalRequest._apiBaseRetried = true;
-        originalRequest.baseURL = setActiveApiBaseUrl(nextApiBaseUrl);
+        originalRequest.baseURL = normalizeApiBaseUrl(
+          setActiveApiBaseUrl(nextApiBaseUrl)
+        );
         api.defaults.baseURL = originalRequest.baseURL;
         return api(originalRequest);
       }
     }
 
     if (!error.response) {
-      console.error(`Backend not reachable at ${API_BASE_URL}`);
+      console.error(`Backend not reachable at ${api.defaults.baseURL || API_BASE_URL}`);
       return Promise.reject(error);
     }
 
@@ -228,11 +228,6 @@ export const logs = {
     });
   },
 
-  ingest: (payload, apiKey) =>
-    api.post("/logs/ingest", payload, {
-      headers: { "x-api-key": apiKey },
-    }),
-
   simulate: () => api.post("/logs/simulate"),
 };
 
@@ -240,6 +235,7 @@ export const uploads = {
   uploadCsv: (file) => {
     const formData = new FormData();
     formData.append("file", file);
+
     return api.post("/logs/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
       timeout: 45000,
@@ -264,7 +260,6 @@ export const incidents = {
   create: (payload) => api.post("/incidents", payload),
   createFromAlert: (alertId) => api.post(`/incidents/from-alert/${alertId}`),
   update: (id, payload) => api.patch(`/incidents/${id}`, payload),
-  // delete: (id) => api.delete(`/incidents/${id}`),
 };
 
 export const rules = {
@@ -322,7 +317,7 @@ export const apiKeys = {
 
 export const playbooks = {
   list: () => api.get("/playbooks"),
-  execute: (payload) => api.post("/playbooks/execute", payload),
+  execute: (payload) => api.post("/playbooks/execute"),
 };
 
 export default api;

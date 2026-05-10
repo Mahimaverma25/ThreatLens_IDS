@@ -18,8 +18,10 @@ const statusLabel = (value, offlineLabel = "Offline") => {
   return "Unknown";
 };
 
-const percentText = (value) =>
-  typeof value === "number" ? `${Math.round(value * 100)}%` : "Unavailable";
+const percentText = (value) => {
+  if (typeof value !== "number") return "Unavailable";
+  return value <= 1 ? `${Math.round(value * 100)}%` : `${Math.round(value)}%`;
+};
 
 const decimalText = (value) =>
   typeof value === "number" ? value.toFixed(3) : "Unavailable";
@@ -154,7 +156,7 @@ const ModelHealth = () => {
 
   const nidsMetrics = useMemo(
     () => ({
-      status: statusLabel(health?.snort?.status, "Not active"),
+      status: statusLabel(health?.snort?.status || "disabled", "Disabled"),
       eventsLast24h: stats?.traffic?.liveSnortEventsLast24h ?? 0,
       alertsLast24h: stats?.traffic?.liveSnortAlertsLast24h ?? 0,
       lastEventAt: health?.snort?.lastEventAt || null,
@@ -574,7 +576,7 @@ const ModelHealth = () => {
             <div className="model-panel panel-wide">
               <div className="model-panel-header">
                 <h3>ML / IDS Engine</h3>
-                <span>Random Forest, SVM and fallback detection runtime</span>
+                <span>ML engine, rule-based detection and fallback runtime</span>
               </div>
 
               <div className="model-list">

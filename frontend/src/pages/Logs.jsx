@@ -3,7 +3,17 @@ import MainLayout from "../layout/MainLayout";
 import { logs } from "../services/api";
 import useSocket from "../hooks/useSocket";
 
-const resolveSocketLog = (payload) => payload?.data || payload;
+const resolveSocketLog = (payload) => {
+  if (!payload) return null;
+
+  if (payload.data?._id) return payload.data;
+  if (payload.log?._id) return payload.log;
+  if (payload.latestEvent?._id) return payload.latestEvent;
+  if (payload.items?.[0]?._id) return payload.items[0];
+  if (payload.data?.items?.[0]?._id) return payload.data.items[0];
+
+  return payload?._id ? payload : null;
+};
 
 const formatTimestamp = (value) => {
   if (!value) return "No data";

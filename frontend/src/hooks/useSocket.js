@@ -1,16 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import createSocketClient from "../services/socket";
 
 const useSocket = (token, handlers = {}) => {
   const socketRef = useRef(null);
   const handlersRef = useRef(handlers);
-  const [connectionStatus, setConnectionStatus] = useState(token ? "connecting" : "idle");
+
+  const [connectionStatus, setConnectionStatus] = useState(
+    token ? "connecting" : "idle"
+  );
   const [lastConnectedAt, setLastConnectedAt] = useState(null);
   const [lastDisconnectedAt, setLastDisconnectedAt] = useState(null);
   const [lastError, setLastError] = useState("");
 
+  const handlerKeys = useMemo(
+    () => Object.keys(handlers || {}).sort().join("|"),
+    [handlers]
+  );
+
   useEffect(() => {
-    handlersRef.current = handlers;
+    handlersRef.current = handlers || {};
   }, [handlers]);
 
   useEffect(() => {
@@ -19,6 +27,7 @@ const useSocket = (token, handlers = {}) => {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+
       setConnectionStatus("idle");
       return undefined;
     }
@@ -27,10 +36,18 @@ const useSocket = (token, handlers = {}) => {
     socketRef.current = socket;
     setConnectionStatus("connecting");
 
-    const attachHandlers = () => {
+    const bindCustomHandlers = () => {
       Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
+        if (typeof handler !== "function") return;
         socket.off(event);
         socket.on(event, handler);
+      });
+    };
+
+    const unbindCustomHandlers = () => {
+      Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
+        if (typeof handler !== "function") return;
+        socket.off(event, handler);
       });
     };
 
@@ -38,53 +55,44 @@ const useSocket = (token, handlers = {}) => {
       setConnectionStatus("connected");
       setLastConnectedAt(new Date().toISOString());
       setLastError("");
-      attachHandlers();
+      bindCustomHandlers();
     };
 
-    const handleDisconnect = () => {
+    const handleDisconnect = (reason) => {
       setConnectionStatus("disconnected");
       setLastDisconnectedAt(new Date().toISOString());
+
+      if (reason) {
+        setLastError(String(reason));
+      }
     };
 
-    const handleError = (error) => {
+    const handleConnectError = (error) => {
       setConnectionStatus("error");
       setLastError(error?.message || "Socket connection error");
     };
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
-    socket.on("connect_error", handleError);
-    attachHandlers();
+    socket.on("connect_error", handleConnectError);
+
+    bindCustomHandlers();
+
+    if (!socket.connected) {
+      socket.connect();
+    }
 
     return () => {
+      unbindCustomHandlers();
+
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
-      socket.off("connect_error", handleError);
-      Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
-        socket.off(event, handler);
-      });
+      socket.off("connect_error", handleConnectError);
+
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [token]);
-
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket) {
-      return undefined;
-    }
-
-    Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
-      socket.off(event);
-      socket.on(event, handler);
-    });
-
-    return () => {
-      Object.entries(handlersRef.current || {}).forEach(([event, handler]) => {
-        socket.off(event, handler);
-      });
-    };
-  }, [handlers]);
+  }, [token, handlerKeys]);
 
   return {
     socket: socketRef.current,
